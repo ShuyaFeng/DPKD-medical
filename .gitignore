@@ -1,0 +1,31 @@
+# Python venv (machine-specific, ~200MB)
+.venv/
+__pycache__/
+*.pyc
+.python-version
+
+# Datasets — do NOT commit raw DRIVE etc. (licensing); fetch with the
+# download instructions in README / phase0_drive_real.py.
+data/
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.bbl
+*.blg
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+*.pdf
+!**/figures/*.pdf
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
