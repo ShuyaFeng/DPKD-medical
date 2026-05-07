@@ -1,0 +1,10 @@
+# Core: required for all phase0_*.py validation scripts.
+numpy>=2.0
+scipy>=1.13
+matplotlib>=3.9
+scikit-image>=0.24
+Pillow>=10.0
+
+# Optional: only needed for demo_noise.py (PATE-style teaching demo).
+# Uncomment if you want to run that script.
+# torch>=2.2
