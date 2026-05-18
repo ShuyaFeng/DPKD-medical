@@ -1,0 +1,77 @@
+#!/bin/bash
+#SBATCH --job-name=UNET_BOTTLENECK_CH_GRAD
+#SBATCH --partition=pascalnodes-medium
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem-per-cpu=4G
+#SBATCH --time=04:00:00
+#SBATCH --output=/data/user/home/ialam/mmsegmentation/slurm_out/unet_bottleneck_channel_analysis_gradient_%j.out
+#SBATCH --error=/data/user/home/ialam/mmsegmentation/slurm_out/unet_bottleneck_channel_analysis_gradient_%j.err
+
+# -----------------------------
+# Clean environment
+# -----------------------------
+module purge
+source /share/apps/rc/software/Anaconda3/2023.07-2/etc/profile.d/conda.sh
+conda activate mmseg-cu124-240
+
+export PYTHONNOUSERSITE=1
+export PYTHONHASHSEED=3405
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
+
+# -----------------------------
+# Paths
+# -----------------------------
+export MMSEG=/data/user/home/ialam/mmsegmentation
+export DATA=/data/user/home/ialam/mmsegmentation/data/DRIVE
+
+export CONFIG=/data/user/home/ialam/mmseg_models/unet_teacher/unet-s5-d16_fcn_4xb4-ce-1.0-dice-3.0-40k_drive-64x64.py
+
+export CKPT=/data/user/home/ialam/mmseg_models/unet_teacher/fcn_unet_s5-d16_ce-1.0-dice-3.0_64x64_40k_drive_20211210_201820-785de5c2.pth
+
+export SCRIPT=$MMSEG/tools/analysis/analyze_unet_drive_bottleneck_channels_gradient.py
+export OUT=$MMSEG/work_dirs/UNET64_DRIVE_BOTTLENECK_CHANNEL_ANALYSIS_GRADIENT_s3405
+
+# -----------------------------
+# Go to MMSegmentation repo
+# -----------------------------
+cd "$MMSEG"
+
+mkdir -p slurm_out
+mkdir -p slurm_scripts
+mkdir -p "$OUT"
+
+export PYTHONPATH="$MMSEG:$PYTHONPATH"
+
+echo "=========================================="
+echo "Starting GRADIENT-ONLY U-Net bottleneck channel analysis (GKD Eq. 1)"
+echo "Job ID: $SLURM_JOB_ID"
+echo "MMSEG: $MMSEG"
+echo "DATA: $DATA"
+echo "CONFIG: $CONFIG"
+echo "CKPT: $CKPT"
+echo "SCRIPT: $SCRIPT"
+echo "OUT: $OUT"
+echo "=========================================="
+
+# -----------------------------
+# Full validation run
+# -----------------------------
+python "$SCRIPT" \
+  --config "$CONFIG" \
+  --checkpoint "$CKPT" \
+  --data-root "$DATA" \
+  --out-dir "$OUT" \
+  --split val \
+  --device cuda:0 \
+  --num-workers 4 \
+  --foreground-class 1 \
+  --ignore-index 255 \
+  --pad-divisor 16
+
+echo "=========================================="
+echo "GRADIENT-ONLY bottleneck channel analysis finished"
+echo "Results saved in: $OUT"
+echo "=========================================="

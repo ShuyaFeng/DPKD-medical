@@ -1,0 +1,65 @@
+{
+  "noise_type": "uniform",
+  "epsilon": 4.0,
+  "K": 1,
+  "lambda_gkd": 0.4,
+  "max_iters": 40000,
+  "best_mDice": 0.886855,
+  "best_iter": 40000,
+  "student_baseline_mDice": 0.8791,
+  "history": [
+    {
+      "iter": 4000,
+      "mDice": 0.873717,
+      "vessel_Dice": 0.769407
+    },
+    {
+      "iter": 8000,
+      "mDice": 0.869678,
+      "vessel_Dice": 0.762634
+    },
+    {
+      "iter": 12000,
+      "mDice": 0.886618,
+      "vessel_Dice": 0.793649
+    },
+    {
+      "iter": 16000,
+      "mDice": 0.885815,
+      "vessel_Dice": 0.791269
+    },
+    {
+      "iter": 20000,
+      "mDice": 0.884235,
+      "vessel_Dice": 0.788675
+    },
+    {
+      "iter": 24000,
+      "mDice": 0.882195,
+      "vessel_Dice": 0.785331
+    },
+    {
+      "iter": 28000,
+      "mDice": 0.886075,
+      "vessel_Dice": 0.791651
+    },
+    {
+      "iter": 32000,
+      "mDice": 0.886347,
+      "vessel_Dice": 0.792094
+    },
+    {
+      "iter": 36000,
+      "mDice": 0.886735,
+      "vessel_Dice": 0.792882
+    },
+    {
+      "iter": 40000,
+      "mDice": 0.886855,
+      "vessel_Dice": 0.793328
+    }
+  ],
+  "teacher_config": "/data/user/home/ialam/mmseg_models/unet_teacher/unet-s5-d16_fcn_4xb4-ce-1.0-dice-3.0-40k_drive-64x64.py",
+  "student_config": "/data/user/home/ialam/mmseg_models/unet_student/unet-s5-d16-small_fcn_4xb4-ce-1.0-dice-3.0-40k_drive-64x64.py",
+  "importance_csv": "/data/user/home/ialam/mmsegmentation/work_dirs/UNET64_DRIVE_BOTTLENECK_CHANNEL_ANALYSIS_GRADIENT_s3405/channel_importance_scores_bottleneck_gradient.csv"
+}

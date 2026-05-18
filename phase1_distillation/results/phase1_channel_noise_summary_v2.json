@@ -1,0 +1,64 @@
+{
+  "version": "v2_normalised",
+  "config": "/data/user/home/ialam/mmseg_models/unet_teacher/unet-s5-d16_fcn_4xb4-ce-1.0-dice-3.0-40k_drive-64x64.py",
+  "checkpoint": "/data/user/home/ialam/mmseg_models/unet_teacher/fcn_unet_s5-d16_ce-1.0-dice-3.0_64x64_40k_drive_20211210_201820-785de5c2.pth",
+  "importance_csv": "/data/user/home/ialam/mmsegmentation/work_dirs/UNET64_DRIVE_BOTTLENECK_CHANNEL_ANALYSIS_GRADIENT_s3405/channel_importance_scores_bottleneck_gradient.csv",
+  "n_images": 20,
+  "n_channels": 1024,
+  "K_teachers": 10,
+  "delta_dp": 1e-05,
+  "epsilons": [
+    1.0,
+    2.0,
+    4.0,
+    8.0,
+    16.0,
+    32.0
+  ],
+  "clean_dice": 0.787261,
+  "cap_stats": {
+    "min": 1.6614,
+    "max": 29.4849,
+    "mean": 10.8197,
+    "median": 10.1626
+  },
+  "sensitivity_delta_c_after_normalisation": 0.2,
+  "mean_dice": {
+    "no_noise": {
+      "1.0": 0.787261,
+      "2.0": 0.787261,
+      "4.0": 0.787261,
+      "8.0": 0.787261,
+      "16.0": 0.787261,
+      "32.0": 0.787261
+    },
+    "uniform": {
+      "1.0": 0.103786,
+      "2.0": 0.120734,
+      "4.0": 0.162519,
+      "8.0": 0.200935,
+      "16.0": 0.227677,
+      "32.0": 0.26921
+    },
+    "channel_WF": {
+      "1.0": 0.105702,
+      "2.0": 0.126994,
+      "4.0": 0.167945,
+      "8.0": 0.193512,
+      "16.0": 0.225437,
+      "32.0": 0.265516
+    }
+  },
+  "lift_channel_WF_over_uniform_dice": {
+    "1.0": 0.001917,
+    "2.0": 0.006261,
+    "4.0": 0.005426,
+    "8.0": -0.007423,
+    "16.0": -0.00224,
+    "32.0": -0.003694
+  },
+  "interpretation": "lift > 0 at any epsilon means channel-WF preserved Dice better than uniform noise at the same privacy budget. This is the Phase 1 test from RESEARCH_PLAN.md Section 8.",
+  "outputs": {
+    "per_image_csv": "/data/user/home/ialam/mmsegmentation/work_dirs/PHASE1_CHANNEL_NOISE_V2/phase1_channel_noise_results_v2.csv"
+  }
+}

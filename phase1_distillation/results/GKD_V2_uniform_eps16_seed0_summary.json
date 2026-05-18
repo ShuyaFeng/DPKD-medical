@@ -1,0 +1,66 @@
+{
+  "version": "v2_direct_feature_matching",
+  "noise_type": "uniform",
+  "epsilon": 16.0,
+  "seed": 0,
+  "K": 1,
+  "lambda_feat": 0.4,
+  "max_iters": 40000,
+  "best_mDice": 0.892022,
+  "best_iter": 32000,
+  "student_baseline_mDice": 0.8791,
+  "lift_over_baseline": 0.012922,
+  "adapter_channels": "512\u21921024",
+  "history": [
+    {
+      "iter": 4000,
+      "mDice": 0.874363,
+      "vessel_Dice": 0.771795
+    },
+    {
+      "iter": 8000,
+      "mDice": 0.890031,
+      "vessel_Dice": 0.799162
+    },
+    {
+      "iter": 12000,
+      "mDice": 0.877424,
+      "vessel_Dice": 0.775322
+    },
+    {
+      "iter": 16000,
+      "mDice": 0.887997,
+      "vessel_Dice": 0.79575
+    },
+    {
+      "iter": 20000,
+      "mDice": 0.88449,
+      "vessel_Dice": 0.789
+    },
+    {
+      "iter": 24000,
+      "mDice": 0.883086,
+      "vessel_Dice": 0.786077
+    },
+    {
+      "iter": 28000,
+      "mDice": 0.889139,
+      "vessel_Dice": 0.797101
+    },
+    {
+      "iter": 32000,
+      "mDice": 0.892022,
+      "vessel_Dice": 0.802535
+    },
+    {
+      "iter": 36000,
+      "mDice": 0.885071,
+      "vessel_Dice": 0.790048
+    },
+    {
+      "iter": 40000,
+      "mDice": 0.887015,
+      "vessel_Dice": 0.793287
+    }
+  ]
+}
