@@ -517,12 +517,28 @@ def main() -> None:
 
     norms_tensor = torch.stack(all_norms, dim=0)
     caps   = torch.quantile(norms_tensor, args.cap_quantile, dim=0).to(device)
-    deltas = 2.0 * caps / args.K
+    # ------------------------------------------------------------------
+    # SENSITIVITY FIX (was the results-invalidating bug)
+    # ------------------------------------------------------------------
+    # The Gaussian noise is added in the *normalised* space: see the
+    # training loop, where clip_and_normalise() forces every channel's
+    # L2 norm to <= 1 BEFORE the noise is added, and denormalise() (the
+    # post-noise *caps) is pure post-processing that does not affect DP.
+    #
+    # In that normalised space the replace-one per-channel L2 sensitivity
+    # is a data-independent constant 2/K (norm <= 1 each side -> diff <= 2),
+    # NOT 2*caps/K. The old `deltas = 2*caps/K` double-counted `caps`
+    # (once dividing the signal inside normalise, once inflating sigma
+    # here), so sigma was ~caps x too large (caps ~ tens-hundreds for a
+    # 1332-dim channel vector). That drowned the teacher target in noise
+    # at *every* epsilon, collapsing every run to the student baseline and
+    # making uniform indistinguishable from channel_WF.
+    deltas = torch.full_like(caps, 2.0 / args.K)
 
     print(f"Cap stats: min={caps.min():.3f}  max={caps.max():.3f}  "
-          f"mean={caps.mean():.3f}")
-    print(f"K={args.K}  delta_c=2*cap/K: "
-          f"min={deltas.min():.3f}  mean={deltas.mean():.3f}")
+          f"mean={caps.mean():.3f}  (used only for clip/normalise, NOT for sensitivity)")
+    print(f"K={args.K}  delta_c = 2/K (normalised-space L2 sensitivity) "
+          f"= {2.0 / args.K:.4f}  (data-independent, constant across channels)")
 
     # ------------------------------------------------------------------
     # Compute noise sigma

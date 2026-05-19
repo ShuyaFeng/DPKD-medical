@@ -505,12 +505,18 @@ def main() -> None:
 
     norms_tensor = torch.stack(all_norms, dim=0)       # (N, C)
     caps = torch.quantile(norms_tensor, args.cap_quantile, dim=0).to(device)
-    deltas = 2.0 * caps / args.K                        # sensitivity
+    # SENSITIVITY FIX (same bug as v2): noise is added in the normalised
+    # space where clip_and_normalise() forces every channel L2 norm <= 1,
+    # so the replace-one per-channel L2 sensitivity is the data-independent
+    # constant 2/K, NOT 2*caps/K. The old 2*caps/K double-counted `caps`
+    # and inflated sigma by ~caps, drowning the teacher signal at every
+    # epsilon. denormalise() (*caps after noise) is pure post-processing.
+    deltas = torch.full_like(caps, 2.0 / args.K)        # sensitivity (fixed)
 
     print(f"Cap stats: min={caps.min():.3f} max={caps.max():.3f} "
-          f"mean={caps.mean():.3f}")
-    print(f"K={args.K}, delta_c = 2*cap_c/K: "
-          f"min={deltas.min():.3f} mean={deltas.mean():.3f}")
+          f"mean={caps.mean():.3f}  (clip/normalise only, NOT sensitivity)")
+    print(f"K={args.K}, delta_c = 2/K (normalised-space sensitivity) "
+          f"= {2.0 / args.K:.4f}  (data-independent)")
 
     # ------------------------------------------------------------------
     # Pre-compute noise sigma for the chosen epsilon
