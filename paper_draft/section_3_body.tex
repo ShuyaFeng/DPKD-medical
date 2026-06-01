@@ -1,0 +1,288 @@
+% =====================================================================
+%  Section 3 — Privacy Model and Channel-Importance Noise Allocation
+%
+%  Drop-in LaTeX for the privacy / methods section of the WACV paper.
+%  No proprietary packages: needs only amsmath, amssymb, booktabs.
+%
+%  Numbers in Table 1 come from:
+%      phase1_distillation/scripts/privacy_accounting.py
+%  Re-run that script to refresh if T, B, or N change.
+% =====================================================================
+
+\section{Privacy Model and Channel-Importance Noise Allocation}
+\label{sec:privacy}
+
+We formalise the privacy model in three steps. \S\ref{ssec:threat}
+states the threat model and explains why it differs from the implicit
+\emph{per-iteration release} model used by prior DP feature
+distillation work. \S\ref{ssec:accounting} gives the composition
+accounting. \S\ref{ssec:wf} derives the channel-importance
+water-filling allocation that allocates the per-release budget across
+the bottleneck channels.
+
+% ---------------------------------------------------------------------
+\subsection{Threat model: sample-once-per-image release}
+\label{ssec:threat}
+
+We consider a federated medical setting in which a data-holding site
+processes each patient image \emph{once} through the teacher encoder,
+adds Gaussian noise to the resulting bottleneck representation, and
+releases the noisy representation. A separate party trains the student
+against these fixed noisy targets. Formally, for training set
+$\mathcal{D}=\{x_i\}_{i=1}^{N}$ and teacher encoder
+$\phi_T : \mathcal{X}\!\to\!\mathbb{R}^{C\times H\times W}$, the
+released objects are
+\begin{equation}
+\widetilde{z}_i \;=\; \mathrm{denorm}\!\bigl(\,\mathrm{norm}(\phi_T(x_i)) + \eta_i\,\bigr),
+\qquad \eta_i \sim \mathcal{N}(0,\,\mathrm{diag}(\sigma^2)),
+\label{eq:release}
+\end{equation}
+where $\mathrm{norm}(\cdot)$ performs per-channel $L_2$ clipping and
+normalisation so that each channel of the released tensor lies in the
+unit ball before noise is added.
+
+\textbf{Why this differs from prior work.}
+Existing implementations of DP feature distillation re-sample noise
+\emph{at every training iteration} of the student
+\cite{lan2024gkd,Anonymous_anonymous}. Under this implicit
+\emph{per-iteration} model, each training image's features are
+released $Q = TB/N$ times across $T$ iterations of batch size $B$;
+adaptive composition over $Q$ releases blows the user-level $\varepsilon$
+up by orders of magnitude (cf.\ Table~\ref{tab:privacy}). The
+sample-once model in \eqref{eq:release} eliminates this composition
+entirely: each user contributes exactly one release.
+
+% ---------------------------------------------------------------------
+\subsection{Composition and budget accounting}
+\label{ssec:accounting}
+
+We use zero-Concentrated Differential Privacy (zCDP)
+\cite{bun2016concentrated} as the working unit. For a Gaussian
+mechanism on a $C$-dimensional vector with per-coordinate sensitivity
+$\Delta_c$ and per-coordinate noise scale $\sigma_c$, the per-release
+zCDP cost is
+\begin{equation}
+\rho_{\mathrm{rel}}
+ \;=\; \sum_{c=1}^{C}\frac{\Delta_c^2}{2\,\sigma_c^2}.
+\label{eq:rho-rel}
+\end{equation}
+After per-channel $L_2$ normalisation each channel has norm at most
+$1$, so the replace-one $L_2$ sensitivity is the data-independent
+constant $\Delta_c = 2/K$ for all $c$, where $K\geq 1$ is the
+PATE-style teacher ensemble size (we use $K=1$ unless otherwise
+noted).
+
+\paragraph{Conversion to $(\varepsilon,\delta)$-DP.}
+By \cite[Prop.~1.3]{bun2016concentrated}, a $\rho$-zCDP mechanism is
+$(\rho + 2\sqrt{\rho\log(1/\delta)},\,\delta)$-DP for any $\delta>0$.
+Conversely, the inverse map
+\begin{equation}
+\rho(\varepsilon,\delta)
+ \;=\;\Bigl(\sqrt{\log(1/\delta)+\varepsilon}-\sqrt{\log(1/\delta)}\,\Bigr)^{2}
+\label{eq:eps-to-rho}
+\end{equation}
+gives the maximum zCDP that fits inside a target
+$(\varepsilon,\delta)$-DP budget.
+
+\paragraph{Composition.}
+The two threat models differ only in the number of times each user's
+data participates in a release.
+\begin{itemize}
+\item \textbf{Sample-once per image.} Each user contributes a single
+release. The user-level cost is $\rho_{\mathrm{user}} = \rho_{\mathrm{rel}}$,
+giving user-level $\varepsilon_{\mathrm{user}} = \varepsilon_{\mathrm{rel}}$.
+\item \textbf{Per-iteration release.} Each user participates in
+$Q = TB/N$ releases of fresh noise on fresh teacher queries. Naive
+zCDP composition gives $\rho_{\mathrm{user}} = Q\,\rho_{\mathrm{rel}}$,
+which is then mapped back to $(\varepsilon_{\mathrm{user}}, \delta)$ via
+\cite[Prop.~1.3]{bun2016concentrated}.
+\end{itemize}
+
+\paragraph{Reported vs.\ true privacy.}
+Table~\ref{tab:privacy} contrasts the user-level $\varepsilon$ implied
+by each threat model for the configurations used throughout this paper
+($T{=}40{,}000$, $B{=}4$, $N{=}20$, $\delta{=}10^{-5}$). The
+per-iteration model inflates the privacy cost by 400--1800$\times$
+relative to what is reported by the noise calibration; the sample-once
+model in \eqref{eq:release} faithfully reports user-level privacy by
+construction.
+
+\begin{table}[t]
+\centering
+\small
+\caption{User-level $\varepsilon$ implied by each threat model for a
+range of per-release $\varepsilon$ values. The per-iteration model
+(prior work's implicit model) yields privacy guarantees that are
+hundreds to thousands of times weaker than reported; the sample-once
+model (ours) reports the actual user-level guarantee.
+Parameters: $T{=}40{,}000$, $B{=}4$, $N{=}20$, $\delta{=}10^{-5}$.}
+\label{tab:privacy}
+\begin{tabular}{c c r r}
+\toprule
+per-release $\varepsilon$ & threat model & releases/user & user-level $\varepsilon$ \\
+\midrule
+\multirow{2}{*}{$2$}  & per-iteration & $8000$ & $812.1$ \\
+                      & sample-once   & $1$    & $2.0$   \\
+\addlinespace[2pt]
+\multirow{2}{*}{$4$}  & per-iteration & $8000$ & $2712.4$ \\
+                      & sample-once   & $1$    & $4.0$    \\
+\addlinespace[2pt]
+\multirow{2}{*}{$8$}  & per-iteration & $8000$ & $9014.8$ \\
+                      & sample-once   & $1$    & $8.0$    \\
+\addlinespace[2pt]
+\multirow{2}{*}{$16$} & per-iteration & $8000$ & $28569.6$ \\
+                      & sample-once   & $1$    & $16.0$    \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---------------------------------------------------------------------
+\subsection{Channel-importance water-filling allocation}
+\label{ssec:wf}
+
+Equation \eqref{eq:rho-rel} shows that a fixed per-release budget
+$\rho_{\mathrm{rel}}$ can be spent across channels in many different
+ways. We pick the allocation that minimises the
+\emph{importance-weighted reconstruction error}
+\begin{equation}
+\min_{\sigma_1,\ldots,\sigma_C > 0}
+\sum_{c=1}^C s_c\,\sigma_c^{2}
+\quad\text{s.t.}\quad
+\sum_{c=1}^C\frac{\Delta_c^{2}}{2\,\sigma_c^{2}} \le \rho_{\mathrm{rel}},
+\label{eq:opt}
+\end{equation}
+where $s_c \ge 0$ is a per-channel importance score (we use
+$s_c = \mathrm{mean}_{i,j} |\partial\mathcal{L}_{\mathrm{task}}/\partial \phi_{T,c}^{i,j}|$,
+the GKD-style gradient magnitude \cite{lan2024gkd}). Solving
+\eqref{eq:opt} via Lagrangian gives a closed form.
+
+\begin{theorem}[Channel-WF optimal allocation]
+\label{thm:wf}
+For positive importance scores $\{s_c\}$, positive sensitivities
+$\{\Delta_c\}$ and budget $\rho_{\mathrm{rel}}>0$, the unique
+minimiser of \eqref{eq:opt} is
+\begin{equation}
+\sigma^{\star}_c \;=\; \kappa \,\sqrt{\Delta_c}\, s_c^{-1/4},
+\qquad
+\kappa \;=\; \sqrt{\frac{1}{2\rho_{\mathrm{rel}}}
+                          \sum_{c=1}^{C}\Delta_c\,\sqrt{s_c}}.
+\label{eq:wf}
+\end{equation}
+The minimised objective scales as $\bigl(\sum_c \Delta_c\sqrt{s_c}\bigr)^2$,
+strictly less than the uniform allocation
+$\sigma^{\mathrm{unif}} = \sqrt{(\sum_c \Delta_c^2) / (2\rho_{\mathrm{rel}})}$
+whenever the $s_c$ are non-constant.
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+Set $u_c = 1/\sigma_c^2$. The constraint becomes
+$\sum_c \Delta_c^2 u_c / 2 \le \rho_{\mathrm{rel}}$ and the objective
+$\sum_c s_c / u_c$. Stationarity of the Lagrangian gives
+$u_c \propto \sqrt{s_c}/\Delta_c$, which inverts to
+\eqref{eq:wf}. Strictness follows from Cauchy--Schwarz.
+The full proof, including the active-constraint argument and the
+strict-improvement comparison, is given in Appendix~\ref{app:proof}.
+\end{proof}
+
+Theorem~\ref{thm:wf} implements the intended behaviour:
+high-importance channels (large $s_c$) receive smaller $\sigma_c$,
+and the closed form makes the per-release budget allocation
+deterministic given the importance scores.
+
+% ---------------------------------------------------------------------
+\subsection{Joint budget split (caps, importance, release)}
+\label{ssec:budget-split}
+
+Two upstream quantities used in the pipeline are themselves
+data-dependent: the per-channel clipping caps $\widehat{c}_c$ and the
+importance scores $\widehat{s}_c$. To be DP-honest we charge a piece
+of the total budget to each. With total budget $\rho_{\mathrm{tot}}$
+we split
+\begin{equation}
+\rho_{\mathrm{tot}}
+ \;=\;
+ \rho_{\mathrm{caps}} \;+\; \rho_{\mathrm{imp}} \;+\; \rho_{\mathrm{rel}},
+\label{eq:split}
+\end{equation}
+release the caps and importance scores via Gaussian mechanisms with
+the corresponding zCDP costs, and feed the (noisy) outputs into the
+channel-WF allocation \eqref{eq:wf}. The split fractions
+$(f_{\mathrm{caps}},f_{\mathrm{imp}},f_{\mathrm{rel}})$ with
+$f_{\mathrm{caps}}+f_{\mathrm{imp}}+f_{\mathrm{rel}}=1$ are
+hyperparameters that we sweep analytically before any training runs.
+
+\paragraph{Analytical sweep.}
+For a fixed importance vector $\{s_c\}$ we can compute the WF
+objective \eqref{eq:opt} under DP-noisy importance in closed form
+(no neural-network training required). Concretely, for a candidate
+split we (i) derive $\sigma_{\mathrm{imp}}$ from $\rho_{\mathrm{imp}}$
+via the Gaussian mechanism, (ii) draw a single sample of noisy
+importance $\widehat{s}_c \!\leftarrow\! s_c + \mathcal{N}(0,\sigma_{\mathrm{imp}}^{2})$,
+clipping to non-negative, (iii) plug $\widehat{s}_c$ and
+$\rho_{\mathrm{rel}}$ into Theorem~\ref{thm:wf}, and (iv) compare the
+WF objective to the uniform-allocation objective at the same
+$\rho_{\mathrm{rel}}$. Table~\ref{tab:budget-split} reports the
+\emph{WF advantage} $(J_{\mathrm{unif}}\!-\!J_{\mathrm{WF}})/J_{\mathrm{unif}}$
+at split $(0.10,0.45,0.45)$ across four total budgets, together with
+the oracle (clean-importance) advantage for context. The analysis
+uses a synthetic $\mathrm{Zipf}(\alpha{=}1)$ importance vector on
+$C{=}1024$ channels with $K{=}1$ and $\delta{=}10^{-5}$; the same
+analytical recipe applied to the real gradient-magnitude importance
+of \S\ref{sec:experiments} produces qualitatively identical trends.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Channel-WF advantage at budget split
+$(f_{\mathrm{caps}},f_{\mathrm{imp}},f_{\mathrm{rel}})=(0.10,0.45,0.45)$
+under DP-honest noisy importance, as a function of the total
+user-level budget $\varepsilon_{\mathrm{tot}}$. Below
+$\varepsilon_{\mathrm{tot}}\!\approx\!8$ the importance signal is too
+noisy to support WF over uniform; above it, WF recovers a large
+fraction of the oracle (clean-importance) advantage.
+Synthetic $\mathrm{Zipf}(\alpha{=}1)$ importance on $C{=}1024$
+channels, $K{=}1$, $\delta{=}10^{-5}$.}
+\label{tab:budget-split}
+\begin{tabular}{c r r r}
+\toprule
+$\varepsilon_{\mathrm{tot}}$ & top-100 rank overlap & honest WF adv & clean WF adv (oracle) \\
+\midrule
+$2$  & $0.23$ & $-100.4\%$ & $+49.1\%$ \\
+$4$  & $0.27$ & $-19.3\%$  & $+49.1\%$ \\
+$8$  & $0.38$ & $+21.2\%$  & $+49.1\%$ \\
+$16$ & $0.55$ & $+40.6\%$  & $+49.1\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Implications.}
+Three things follow from Table~\ref{tab:budget-split}.
+\emph{(i)} A non-trivial split is required even at large
+$\varepsilon_{\mathrm{tot}}$: when no budget is reserved for
+importance estimation (the implicit choice in prior work, equivalent
+to $f_{\mathrm{imp}}{=}0$), one inherits the oracle advantage but
+loses any DP guarantee on importance.
+\emph{(ii)} The minimum total budget at which honest channel-WF beats
+honest uniform under this split is $\varepsilon_{\mathrm{tot}}\!\approx\!8$
+for our setting; below it, the importance ranking is destroyed
+faster than the per-release allocation can exploit it.
+\emph{(iii)} For $\varepsilon_{\mathrm{tot}}\!\ge\!16$ the honest
+allocation recovers $\sim\!80\%$ of the oracle advantage, suggesting
+that on tasks where a meaningful total budget is available, the
+co-design pays off.
+The empirical training-time validation appears in
+\S\ref{sec:experiments}.
+
+% ---------------------------------------------------------------------
+\subsection{Implementation}
+\label{ssec:impl}
+
+The sample-once threat model is realised by a single precomputation
+pass: before student training begins, every unique training image is
+fed once through the teacher encoder, the bottleneck is normalised,
+noise drawn from \eqref{eq:release} is added, and the result is
+stored to disk keyed by image identifier. Student training then loads
+these fixed targets at every iteration, eliminating both fresh teacher
+queries and fresh noise samples from the inner loop. Pseudocode
+appears in Appendix~\ref{app:pseudocode}.
+

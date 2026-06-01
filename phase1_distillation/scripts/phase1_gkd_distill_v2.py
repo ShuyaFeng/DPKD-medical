@@ -50,7 +50,7 @@ import csv
 import json
 import math
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -127,12 +127,21 @@ def set_data_root(cfg: Config, data_root: str) -> None:
             ds["data_root"] = data_root
 
 
-def build_model(cfg: Config, checkpoint: str, device: str, frozen: bool = False):
+def build_model(
+    cfg: Config,
+    checkpoint: str,
+    device: str,
+    frozen: bool = False,
+    from_scratch: bool = False,
+):
     init_default_scope(cfg.get("default_scope", "mmseg"))
     model = MODELS.build(cfg.model)
     if revert_sync_batchnorm is not None:
         model = revert_sync_batchnorm(model)
-    load_checkpoint(model, checkpoint, map_location="cpu")
+    if from_scratch:
+        print("  [from_scratch] skipping checkpoint load — random init.")
+    else:
+        load_checkpoint(model, checkpoint, map_location="cpu")
     model.to(device)
     if frozen:
         model.eval()
@@ -407,6 +416,27 @@ def load_importances(csv_path: str) -> torch.Tensor:
     return torch.tensor(vals, dtype=torch.float32).clamp(min=1e-12)
 
 
+def load_caps_from_csv(csv_path: str) -> torch.Tensor:
+    """
+    Load per-channel L2 caps from a precomputed CSV.
+
+    Used in --threat-model=public-proxy mode: the caps were estimated
+    on a public retinal dataset (HRF / STARE / CHASE-DB1) disjoint from
+    the private training data, and therefore consume ZERO privacy
+    budget on the training set.
+
+    CSV format (header + one row per channel):
+        cap_norm
+        12.34
+        ...
+    """
+    vals = []
+    with open(csv_path, "r") as f:
+        for row in csv.DictReader(f):
+            vals.append(float(row["cap_norm"]))
+    return torch.tensor(vals, dtype=torch.float32).clamp(min=1e-12)
+
+
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
@@ -423,7 +453,35 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--importance-csv",     required=True)
     p.add_argument("--out-dir",            required=True)
     p.add_argument("--noise-type",         required=True,
-                   choices=["uniform", "channel_WF"])
+                   choices=["uniform", "channel_WF", "none"],
+                   help="'none' = zero noise (diagnostic upper-bound).")
+    p.add_argument("--student-from-scratch", action="store_true",
+                   help="Skip loading student checkpoint — random init "
+                        "(diagnostic C).")
+    p.add_argument("--precompute-noise", action="store_true",
+                   help="Sample-once-per-image threat model: compute the "
+                        "noisy teacher bottleneck ONCE per unique training "
+                        "image before training, then reuse across all "
+                        "iterations. This makes the reported epsilon match "
+                        "user-level privacy under composition over the "
+                        "training set (rather than over iterations).")
+    p.add_argument("--threat-model",
+                   choices=["public-proxy", "fully-private"],
+                   default="public-proxy",
+                   help="public-proxy (recommended): caps and importance "
+                        "are estimated on PUBLIC data disjoint from the "
+                        "private training set, consuming ZERO privacy "
+                        "budget; the entire user-level epsilon is spent "
+                        "on the per-image feature release. "
+                        "fully-private: estimate caps from the private "
+                        "training data (current default behaviour; NOT "
+                        "DP-honest unless caps estimation itself is "
+                        "privatised — that path is left as ablation.).")
+    p.add_argument("--public-caps-csv", type=str, default=None,
+                   help="Path to per-channel caps CSV computed on public "
+                        "proxy data (HRF/STARE/CHASE-DB1). Required when "
+                        "--threat-model=public-proxy. Produced by "
+                        "compute_public_proxy.py.")
     p.add_argument("--epsilon",            type=float, required=True)
     p.add_argument("--K",                  type=int,   default=1)
     p.add_argument("--delta-dp",           type=float, default=1e-5)
@@ -439,6 +497,105 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed",               type=int,   default=0,
                    help="Random seed. Run with 0, 1, 2 for statistical averaging.")
     return p.parse_args()
+
+
+# ---------------------------------------------------------------------------
+# Sample-once threat model — precompute noisy teacher bottleneck per image
+# ---------------------------------------------------------------------------
+
+def _img_id(data_sample) -> str:
+    """Stable per-image identifier from an mmseg DataSample's metainfo."""
+    meta = getattr(data_sample, "metainfo", {}) or {}
+    for key in ("img_path", "img_id", "filename", "ori_filename"):
+        v = meta.get(key)
+        if v:
+            return str(v)
+    # Fallback — should not happen with mmseg's DRIVE dataset
+    return f"obj_{id(data_sample)}"
+
+
+def _unwrap_dataset(ds):
+    """Strip wrappers like RepeatDataset/ConcatDataset to count unique items."""
+    while hasattr(ds, "dataset"):
+        ds = ds.dataset
+    return ds
+
+
+def precompute_noisy_teacher_cache(
+    teacher,
+    train_loader,
+    caps: torch.Tensor,
+    sigma: torch.Tensor,
+    device: str,
+    ignore_index: int,
+    pad_divisor: int,
+    max_passes: int = 4,
+) -> Dict[str, torch.Tensor]:
+    """
+    Run the teacher once per UNIQUE training image, add noise, cache on CPU.
+
+    Caller is responsible for ensuring deterministic augmentation (or
+    disabled augmentation) — see warning in main(). This implementation
+    iterates the train loader and dedupes by img_path; with shuffling +
+    RepeatDataset, multiple passes are taken until the cache stops
+    growing or we have seen every underlying image.
+    """
+    n_unique = len(_unwrap_dataset(train_loader.dataset))
+    cache: Dict[str, torch.Tensor] = {}
+    teacher.eval()
+
+    print(f"\n[sample-once] precomputing noisy teacher bottleneck for "
+          f"{n_unique} unique training images...")
+
+    with torch.no_grad():
+        for pass_idx in range(max_passes):
+            cache_size_before = len(cache)
+            for raw_data in train_loader:
+                data = move_to_device(teacher, raw_data, device, training=True)
+                data = pad_to_divisor(data, pad_divisor, ignore_index)
+                enc_outs = unet_encoder(teacher.backbone, data["inputs"])
+                t_bn_clean = enc_outs[-1]
+                t_bn_norm = clip_and_normalise(t_bn_clean, caps)
+                B, C, H, W = t_bn_norm.shape
+                noise = (
+                    torch.randn(B, C, H, W, device=device)
+                    * sigma.view(1, C, 1, 1)
+                )
+                t_bn_noisy = denormalise(t_bn_norm + noise, caps)
+                for b, ds in enumerate(data["data_samples"]):
+                    key = _img_id(ds)
+                    if key not in cache:
+                        cache[key] = t_bn_noisy[b].detach().cpu().clone()
+                if len(cache) >= n_unique:
+                    break
+            if len(cache) >= n_unique:
+                break
+            if len(cache) == cache_size_before:
+                print(f"[sample-once] WARNING: cache stopped growing at "
+                      f"{len(cache)} (< {n_unique}); check img_id keys.")
+                break
+
+    print(f"[sample-once] cached {len(cache)} noisy bottleneck tensors "
+          f"(shape={next(iter(cache.values())).shape if cache else 'n/a'}).")
+    return cache
+
+
+def lookup_cached_noisy_bottleneck(
+    data_samples,
+    cache: Dict[str, torch.Tensor],
+    device: str,
+) -> torch.Tensor:
+    """Build a batch of noisy teacher bottlenecks from the precomputed cache."""
+    tensors = []
+    for ds in data_samples:
+        key = _img_id(ds)
+        if key not in cache:
+            raise KeyError(
+                f"[sample-once] image {key!r} not in cache. "
+                f"Augmentation likely changed img_path — disable train aug."
+            )
+        tensors.append(cache[key].to(device, non_blocking=True))
+    return torch.stack(tensors, dim=0)
 
 
 # ---------------------------------------------------------------------------
@@ -468,8 +625,11 @@ def main() -> None:
     print("Building teacher (frozen)...")
     teacher = build_model(t_cfg, args.teacher_checkpoint, device, frozen=True)
 
-    print("Building student (from baseline checkpoint)...")
-    student = build_model(s_cfg, args.student_checkpoint, device, frozen=False)
+    print("Building student "
+          f"({'RANDOM INIT' if args.student_from_scratch else 'from baseline checkpoint'})...")
+    student = build_model(s_cfg, args.student_checkpoint, device,
+                          frozen=False,
+                          from_scratch=args.student_from_scratch)
 
     # ------------------------------------------------------------------
     # Build adapter  (student channels → teacher channels)
@@ -496,27 +656,43 @@ def main() -> None:
     val_loader   = build_loader(s_cfg, "val",   args.num_workers)
 
     # ------------------------------------------------------------------
-    # Pass 0: estimate per-channel caps from training data
+    # CAPS source — branch on threat model
     # ------------------------------------------------------------------
-    print("\nPass 0: estimating teacher bottleneck caps...")
-    all_norms: List[torch.Tensor] = []
-    n_cap = 0
-    teacher.eval()
-    with torch.no_grad():
-        for raw_data in train_loader:
-            data = move_to_device(teacher, raw_data, device, training=True)
-            data = pad_to_divisor(data, args.pad_divisor, args.ignore_index)
-            enc_outs   = unet_encoder(teacher.backbone, data["inputs"])
-            bottleneck = enc_outs[-1]
-            for b in range(bottleneck.shape[0]):
-                norms = bottleneck[b].flatten(1).norm(dim=1)
-                all_norms.append(norms.cpu())
-                n_cap += 1
-            if n_cap >= 100:
-                break
+    if args.threat_model == "public-proxy":
+        if not args.public_caps_csv:
+            raise ValueError(
+                "--threat-model=public-proxy requires --public-caps-csv "
+                "(produced by compute_public_proxy.py on HRF/STARE/CHASE-DB1)."
+            )
+        caps = load_caps_from_csv(args.public_caps_csv).to(device)
+        print(f"\n[public-proxy] caps loaded from {args.public_caps_csv}")
+        print(f"[public-proxy] ZERO privacy cost for caps — public data.")
+    else:
+        # fully-private (legacy): estimate from private training data.
+        # NOT DP-honest unless caps estimation itself is privatised.
+        print("\n[fully-private] WARNING: estimating caps on PRIVATE training "
+              "data WITHOUT a DP mechanism. This is NOT a valid DP guarantee "
+              "for the caps — use --threat-model=public-proxy unless you "
+              "are running an ablation that quantifies the leak.")
+        print("Pass 0: estimating teacher bottleneck caps...")
+        all_norms: List[torch.Tensor] = []
+        n_cap = 0
+        teacher.eval()
+        with torch.no_grad():
+            for raw_data in train_loader:
+                data = move_to_device(teacher, raw_data, device, training=True)
+                data = pad_to_divisor(data, args.pad_divisor, args.ignore_index)
+                enc_outs   = unet_encoder(teacher.backbone, data["inputs"])
+                bottleneck = enc_outs[-1]
+                for b in range(bottleneck.shape[0]):
+                    norms = bottleneck[b].flatten(1).norm(dim=1)
+                    all_norms.append(norms.cpu())
+                    n_cap += 1
+                if n_cap >= 100:
+                    break
 
-    norms_tensor = torch.stack(all_norms, dim=0)
-    caps   = torch.quantile(norms_tensor, args.cap_quantile, dim=0).to(device)
+        norms_tensor = torch.stack(all_norms, dim=0)
+        caps = torch.quantile(norms_tensor, args.cap_quantile, dim=0).to(device)
     # ------------------------------------------------------------------
     # SENSITIVITY FIX (was the results-invalidating bug)
     # ------------------------------------------------------------------
@@ -546,8 +722,10 @@ def main() -> None:
     rho = eps_to_rho(args.epsilon, args.delta_dp)
     if args.noise_type == "channel_WF":
         sigma = waterfilling_sigma(deltas, teacher_importance, rho)
-    else:
+    elif args.noise_type == "uniform":
         sigma = uniform_sigma(deltas, rho)
+    else:  # "none" — diagnostic upper bound, zero noise
+        sigma = torch.zeros_like(deltas)
 
     print(f"\nNoise type : {args.noise_type}")
     print(f"Epsilon    : {args.epsilon}  rho={rho:.5f}")
@@ -563,6 +741,28 @@ def main() -> None:
             print("  ✅ Water-filling correct")
         else:
             print("  ⚠️  Water-filling inverted — check importance scores")
+
+    # ------------------------------------------------------------------
+    # SAMPLE-ONCE THREAT MODEL — precompute noisy teacher bottleneck
+    # ONCE per unique training image (see paper §3.1).
+    # ------------------------------------------------------------------
+    noisy_cache: Optional[Dict[str, torch.Tensor]] = None
+    if args.precompute_noise:
+        print("\n" + "!" * 70)
+        print("! [sample-once] Train-time augmentation must be deterministic")
+        print("! or disabled for this threat model to be well-defined.")
+        print("! Re-using cached features across iterations even when the")
+        print("! student sees augmented inputs is an approximation.")
+        print("!" * 70)
+        noisy_cache = precompute_noisy_teacher_cache(
+            teacher=teacher,
+            train_loader=train_loader,
+            caps=caps,
+            sigma=sigma,
+            device=device,
+            ignore_index=args.ignore_index,
+            pad_divisor=args.pad_divisor,
+        )
 
     # ------------------------------------------------------------------
     # Optimizer — includes both student AND adapter parameters
@@ -614,19 +814,27 @@ def main() -> None:
         # ==============================================================
         # TEACHER PATH — frozen, no grad on teacher parameters
         # ==============================================================
-        with torch.no_grad():
-            t_enc              = unet_encoder(teacher.backbone, inputs)
-            t_bottleneck_clean = t_enc[-1]               # (B, 1024, H_b, W_b)
-
-            # Clip + normalise → add noise → denormalise
-            t_bn_norm = clip_and_normalise(t_bottleneck_clean, caps)
-            B, C_t, H_b, W_b = t_bn_norm.shape
-            noise = (
-                torch.randn(B, C_t, H_b, W_b, device=device)
-                * sigma.view(1, C_t, 1, 1)
+        if noisy_cache is not None:
+            # Sample-once threat model: fetch precomputed noisy bottleneck
+            # by image id. No new teacher query, no new noise sample.
+            t_bn_noisy = lookup_cached_noisy_bottleneck(
+                data["data_samples"], noisy_cache, device,
             )
-            t_bn_noisy = denormalise(t_bn_norm + noise, caps)
-            # t_bn_noisy: (B, 1024, H_b, W_b) — this is the distillation target
+        else:
+            # Per-iteration release (the original behaviour).
+            with torch.no_grad():
+                t_enc              = unet_encoder(teacher.backbone, inputs)
+                t_bottleneck_clean = t_enc[-1]           # (B, 1024, H_b, W_b)
+
+                # Clip + normalise → add noise → denormalise
+                t_bn_norm = clip_and_normalise(t_bottleneck_clean, caps)
+                B, C_t, H_b, W_b = t_bn_norm.shape
+                noise = (
+                    torch.randn(B, C_t, H_b, W_b, device=device)
+                    * sigma.view(1, C_t, 1, 1)
+                )
+                t_bn_noisy = denormalise(t_bn_norm + noise, caps)
+                # t_bn_noisy: (B, 1024, H_b, W_b) — distillation target
 
         # ==============================================================
         # STUDENT PATH
@@ -721,6 +929,8 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Save summary
     # ------------------------------------------------------------------
+    last_n_iters = history[-3:] if len(history) >= 3 else history
+    final_mdice_mean = float(np.mean([h["mDice"] for h in last_n_iters]))
     summary = {
         "version":                  "v2_direct_feature_matching",
         "noise_type":               args.noise_type,
@@ -728,9 +938,19 @@ def main() -> None:
         "seed":                     args.seed,
         "K":                        args.K,
         "lambda_feat":              args.lambda_feat,
+        "student_from_scratch":     bool(args.student_from_scratch),
+        "precompute_noise":         bool(args.precompute_noise),
+        "release_model":            "sample-once-per-image" if args.precompute_noise
+                                    else "per-iteration-release",
+        "threat_model":             args.threat_model,
+        "caps_source":              ("public-proxy:" + args.public_caps_csv
+                                     if args.threat_model == "public-proxy"
+                                     else "private-train-data"),
+        "importance_source":        args.importance_csv,
         "max_iters":                args.max_iters,
         "best_mDice":               round(best_mdice, 6),
         "best_iter":                best_iter,
+        "final_mDice_lastN_mean":   round(final_mdice_mean, 6),
         "student_baseline_mDice":   0.8791,
         "lift_over_baseline":       round(best_mdice - 0.8791, 6),
         "adapter_channels":         f"{student_bn_channels}→{teacher_bn_channels}",

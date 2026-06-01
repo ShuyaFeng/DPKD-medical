@@ -1,0 +1,171 @@
+% =====================================================================
+%  Appendices — referenced from the main text. Place these AFTER
+%  \appendix in your paper, or in a separate appendix file.
+% =====================================================================
+
+\appendix
+
+% ---------------------------------------------------------------------
+\section{Pseudocode: sample-once distillation}
+\label{app:pseudocode}
+
+Algorithm~\ref{alg:precompute} gives the precompute routine that
+implements the sample-once-per-image release model
+(\S\ref{ssec:threat}, \S\ref{ssec:impl}). It is invoked once before
+the student training loop. Throughout, $\phi_T$ denotes the (frozen)
+teacher encoder, $\mathrm{clip}(\cdot;\widehat{c})$ per-channel $L_2$
+clipping to caps $\widehat{c}$, and $\eta\sim\mathcal{N}(0,\sigma^2)$
+draws independent Gaussian noise per channel and spatial location.
+
+\begin{algorithm}[t]
+\caption{Sample-once precompute of noisy teacher bottlenecks.}
+\label{alg:precompute}
+\begin{algorithmic}[1]
+\Require teacher $\phi_T$; training images $\{x_i\}_{i=1}^{N}$;
+         per-channel caps $\widehat{c}\in\mathbb{R}^{C}$;
+         per-channel noise scales $\sigma\in\mathbb{R}^{C}$
+\Ensure  noisy bottleneck cache
+         $\mathcal{C}:\mathrm{img\_id}\!\to\!\mathbb{R}^{C\times H\times W}$
+\State $\mathcal{C} \gets \emptyset$
+\For{$i = 1,\dots,N$}
+  \State $z_i \gets \phi_T(x_i)$
+         \Comment{forward through encoder, frozen}
+  \State $z_i' \gets \mathrm{clip}(z_i;\widehat{c}) / \widehat{c}$
+         \Comment{per-channel norm $\le 1$}
+  \State sample $\eta_i \in \mathbb{R}^{C\times H\times W}$ with
+         $\eta_i^{(c)} \!\sim\! \mathcal{N}(0,\sigma_c^{2})$
+  \State $\widetilde{z}_i \gets (z_i' + \eta_i)\odot\widehat{c}$
+         \Comment{denormalise}
+  \State $\mathcal{C}[\mathrm{img\_id}(x_i)] \gets \widetilde{z}_i$
+\EndFor
+\State \Return $\mathcal{C}$
+\end{algorithmic}
+\end{algorithm}
+
+\noindent During student training, the inner loop's teacher path is
+replaced by a single look-up $\widetilde{z}_i \leftarrow
+\mathcal{C}[\mathrm{img\_id}(x_i)]$, eliminating both per-iteration
+teacher queries and per-iteration noise samples.
+
+% ---------------------------------------------------------------------
+\section{Full proof of Theorem~\ref{thm:wf}}
+\label{app:proof}
+
+We restate the optimisation problem from \eqref{eq:opt} for
+convenience:
+\begin{equation*}
+\min_{\sigma_1,\ldots,\sigma_C>0}\; \sum_{c=1}^{C} s_c\,\sigma_c^{2}
+\quad\text{s.t.}\quad
+\sum_{c=1}^{C} \frac{\Delta_c^{2}}{2\,\sigma_c^{2}} \le \rho_{\mathrm{rel}}.
+\end{equation*}
+
+\paragraph{Change of variables.}
+Let $u_c = 1/\sigma_c^{2}$, so $u_c > 0$ and $\sigma_c^{2} = 1/u_c$.
+The problem becomes
+\begin{equation}
+\min_{u_1,\ldots,u_C>0}\; \sum_{c=1}^{C} \frac{s_c}{u_c}
+\quad\text{s.t.}\quad
+\sum_{c=1}^{C} \frac{\Delta_c^{2}}{2}\,u_c \le \rho_{\mathrm{rel}}.
+\label{eq:dual}
+\end{equation}
+Both the objective $\sum_c s_c/u_c$ (convex in $u_c$ on the positive
+orthant) and the linear constraint give a convex program with a
+unique minimiser. The constraint is active at the optimum because the
+objective is strictly decreasing in each $u_c$.
+
+\paragraph{Lagrangian.}
+Form the Lagrangian with multiplier $\lambda > 0$:
+\begin{equation*}
+\mathcal{L}(u,\lambda)
+ \;=\; \sum_{c=1}^{C} \frac{s_c}{u_c}
+       + \lambda\left(\sum_{c=1}^{C}\frac{\Delta_c^{2}}{2}u_c - \rho_{\mathrm{rel}}\right).
+\end{equation*}
+Stationarity $\partial\mathcal{L}/\partial u_c = 0$ gives
+\begin{equation*}
+-\frac{s_c}{u_c^{2}} + \frac{\lambda\,\Delta_c^{2}}{2} = 0
+\;\;\Longrightarrow\;\;
+u_c^{\star} \;=\; \sqrt{\frac{2\,s_c}{\lambda\,\Delta_c^{2}}}
+\;=\; \sqrt{\frac{2}{\lambda}}\;\frac{\sqrt{s_c}}{\Delta_c}.
+\end{equation*}
+
+\paragraph{Solving for $\lambda$ via the active constraint.}
+Substitute back into $\sum_c \tfrac{\Delta_c^{2}}{2}u_c^{\star} =
+\rho_{\mathrm{rel}}$:
+\begin{equation*}
+\sum_{c=1}^{C}\frac{\Delta_c^{2}}{2}\sqrt{\frac{2}{\lambda}}\,\frac{\sqrt{s_c}}{\Delta_c}
+ \;=\; \rho_{\mathrm{rel}}
+\;\;\Longrightarrow\;\;
+\sqrt{\frac{1}{2\lambda}}\,\sum_{c=1}^{C}\Delta_c\sqrt{s_c}
+ \;=\; \rho_{\mathrm{rel}}.
+\end{equation*}
+Solving for $\lambda$:
+\begin{equation*}
+\lambda \;=\; \frac{1}{2\,\rho_{\mathrm{rel}}^{2}}
+              \Bigl(\sum_{c=1}^{C}\Delta_c\sqrt{s_c}\Bigr)^{2}.
+\end{equation*}
+
+\paragraph{Optimal $\sigma_c^{\star}$.}
+Substituting $\lambda$ back into $u_c^{\star}$ and using
+$\sigma_c^{\star} = 1/\sqrt{u_c^{\star}}$:
+\begin{equation*}
+\sigma_c^{\star}
+ \;=\;
+ \frac{1}{(2/\lambda)^{1/4}}\,
+ \frac{\Delta_c^{1/2}}{s_c^{1/4}}
+ \;=\;
+ \underbrace{\sqrt{\frac{1}{2\,\rho_{\mathrm{rel}}}\sum_{c=1}^{C}\Delta_c\sqrt{s_c}}}_{\displaystyle\kappa}
+ \;\frac{\sqrt{\Delta_c}}{s_c^{1/4}},
+\end{equation*}
+which is exactly \eqref{eq:wf}.
+
+\paragraph{Optimal objective and strict improvement.}
+The optimal value of the original objective is
+\begin{equation}
+J_{\mathrm{WF}}^{\star}
+ \;=\; \sum_{c=1}^{C} s_c\,(\sigma_c^{\star})^{2}
+ \;=\; \kappa^{2}\sum_{c=1}^{C}\Delta_c\sqrt{s_c}
+ \;=\; \frac{1}{2\,\rho_{\mathrm{rel}}}
+       \Bigl(\sum_{c=1}^{C}\Delta_c\sqrt{s_c}\Bigr)^{2}.
+\label{eq:wf-obj}
+\end{equation}
+For uniform $\sigma_{\mathrm{unif}}$ saturating the same budget,
+$\sigma_{\mathrm{unif}}^{2} = (\sum_c \Delta_c^{2})/(2\,\rho_{\mathrm{rel}})$,
+so the uniform-allocation objective is
+\begin{equation}
+J_{\mathrm{unif}}
+ \;=\; \sigma_{\mathrm{unif}}^{2}\sum_{c}s_c
+ \;=\; \frac{1}{2\,\rho_{\mathrm{rel}}}
+       \Bigl(\sum_{c}\Delta_c^{2}\Bigr)\Bigl(\sum_{c}s_c\Bigr).
+\label{eq:unif-obj}
+\end{equation}
+Comparing \eqref{eq:wf-obj} and \eqref{eq:unif-obj} via Cauchy--Schwarz
+applied to the vectors $(\Delta_c)$ and $(\Delta_c\sqrt{s_c})$, or
+directly via $(\sum_c \Delta_c\sqrt{s_c})^{2} \le
+(\sum_c \Delta_c^{2})(\sum_c s_c)$ with equality iff $s_c$ is
+constant, we obtain
+\begin{equation*}
+J_{\mathrm{WF}}^{\star} \;\le\; J_{\mathrm{unif}},
+\end{equation*}
+with strict inequality whenever the $\{s_c\}$ are not all equal.
+This establishes the strict-improvement claim of Theorem~\ref{thm:wf}
+and completes the proof. \qed
+
+% ---------------------------------------------------------------------
+%  BibTeX entries to add to references.bib (paste into your .bib):
+%
+%  @inproceedings{bun2016concentrated,
+%    title={Concentrated Differential Privacy: Simplifications,
+%           Extensions, and Lower Bounds},
+%    author={Bun, Mark and Steinke, Thomas},
+%    booktitle={Theory of Cryptography Conference (TCC)},
+%    year={2016},
+%  }
+%
+%  @inproceedings{lan2024gkd,
+%    title={Gradient-Guided Knowledge Distillation for Object Detection},
+%    author={Lan, Qizhen and Tian, Qing},
+%    booktitle={IEEE/CVF Winter Conference on Applications of
+%               Computer Vision (WACV)},
+%    year={2024},
+%  }
+% ---------------------------------------------------------------------

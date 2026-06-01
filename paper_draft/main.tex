@@ -1,0 +1,46 @@
+% =====================================================================
+%  Standalone wrapper to preview section_3_privacy.tex.
+%
+%  Build:
+%      pdflatex main && pdflatex main
+%
+%  This file is for COMPILE TESTING ONLY. In the real paper, do:
+%      \input{section_3_privacy}            % inside the main paper
+%  and move the appendices to where your venue expects them.
+% =====================================================================
+
+\documentclass[10pt,letterpaper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{hyperref}
+
+% Theorem environments used in section_3_privacy.tex
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}[theorem]{Proposition}
+
+% Dummy \cite redirector so we don't need a bibliography to compile.
+% Comment this out once you have a real references.bib.
+\providecommand{\cite}[1]{[\textit{#1}]}
+
+\title{[Privacy Section — Standalone Preview]\\
+       Channel-Importance Water-Filling for DP Feature Distillation}
+\author{(authors withheld for review)}
+\date{}
+
+\begin{document}
+\maketitle
+
+\noindent\textit{This is a standalone preview of \S\ref{sec:privacy}
+of the WACV submission. The main introduction, related work,
+experiments and discussion sections live elsewhere; this PDF exists
+to verify that the privacy section compiles cleanly and that the
+tables and the proof appendix render as intended.}
+
+\input{section_3_privacy}
+
+\end{document}

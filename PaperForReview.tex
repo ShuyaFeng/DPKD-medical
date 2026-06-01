@@ -16,7 +16,11 @@
 \usepackage{graphicx}
 \usepackage{amsmath}
 \usepackage{amssymb}
+\usepackage{amsthm}          % theorem environments (used in §3)
 \usepackage{booktabs}
+\usepackage{multirow}        % multi-row cells in Table 1 of §3
+\usepackage{algorithm}       % algorithm float (Appendix A pseudocode)
+\usepackage{algpseudocode}   % \Require / \Ensure / \State syntax
 
 
 % It is strongly recommended to use hyperref, especially for the review version.
@@ -43,6 +47,10 @@
 \def\wacvPaperID{*****} % *** Enter the WACV Paper ID here
 \def\confName{WACV}
 \def\confYear{2025}
+
+% Theorem environments used by paper_draft/section_3_body.tex
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}[theorem]{Proposition}
 
 
 \begin{document}
@@ -288,6 +296,17 @@ This is incorrect: ``... subsequently developed by Alpher \etal~\cite{Alpher03} 
 \end{figure*}
 
 %------------------------------------------------------------------------
+% =====================================================================
+% Privacy / Method section (real WACV content).
+% Source: paper_draft/section_3_body.tex
+% =====================================================================
+\input{paper_draft/section_3_body}
+
+%------------------------------------------------------------------------
+% --------------------------------------------------------------------
+%  EVERYTHING BELOW IS THE WACV TEMPLATE'S PLACEHOLDER CONTENT — keep
+%  for now as a style reference; strip before submission.
+% --------------------------------------------------------------------
 \section{Formatting your paper}
 \label{sec:formatting}
 
@@ -453,6 +472,13 @@ We MUST have this form before your paper can be published in the proceedings.
 Please direct any questions to the production editor in charge of these proceedings at the IEEE Computer Society Press:
 \url{https://www.computer.org/about/contact}.
 
+
+% =====================================================================
+% Appendices (\appendix command + Algorithm 1 pseudocode + full proof
+% of Theorem 1). Source: paper_draft/section_3_appendix.tex
+% MUST appear after all \section commands and before \bibliography.
+% =====================================================================
+\input{paper_draft/section_3_appendix}
 
 %%%%%%%%% REFERENCES
 {\small
