@@ -187,6 +187,38 @@ def test_uniform_sigma_constant():
     _ok("uniform_sigma_constant", f"sigma_all={sigma[0]:.4f}")
 
 
+def test_uniform_sigma_hits_target_rho():
+    """REGRESSION: sum_c delta_c^2 / (2 sigma^2) must equal rho_budget exactly.
+
+    Catches the factor-of-2 bug where sigma was calibrated against 2*rho
+    instead of rho (reported epsilon would not match released sigma).
+    """
+    deltas = torch.full((100,), 2.0)
+    for rho_target in [0.05, 0.5, 5.0]:
+        sigma = v2.uniform_sigma(deltas, rho_target)
+        rho_actual = float((deltas.pow(2) / (2.0 * sigma.pow(2))).sum())
+        rel_err = abs(rho_actual - rho_target) / rho_target
+        assert rel_err < 1e-4, \
+            f"uniform calibration off by {rel_err*100:.2f}% at rho={rho_target} " \
+            f"(target {rho_target}, actual {rho_actual})"
+    _ok("uniform_sigma_hits_target_rho",
+        "sum delta^2/(2 sigma^2) == rho across 3 budgets")
+
+
+def test_waterfilling_sigma_hits_target_rho():
+    """Same regression check for channel_WF."""
+    deltas = torch.full((100,), 2.0)
+    importances = torch.linspace(0.01, 1.0, 100)
+    for rho_target in [0.05, 0.5, 5.0]:
+        sigma = v2.waterfilling_sigma(deltas, importances, rho_target)
+        rho_actual = float((deltas.pow(2) / (2.0 * sigma.pow(2))).sum())
+        rel_err = abs(rho_actual - rho_target) / rho_target
+        assert rel_err < 1e-4, \
+            f"WF calibration off by {rel_err*100:.2f}% at rho={rho_target}"
+    _ok("waterfilling_sigma_hits_target_rho",
+        "sum delta^2/(2 sigma^2) == rho across 3 budgets")
+
+
 # ---------------------------------------------------------------------------
 # Test 5 — waterfilling gives less noise to important channels
 # ---------------------------------------------------------------------------
@@ -488,6 +520,8 @@ if __name__ == "__main__":
         test_argparse_existing_flags_still_work,
         test_argparse_rejects_bad_noise_type,
         test_uniform_sigma_constant,
+        test_uniform_sigma_hits_target_rho,
+        test_waterfilling_sigma_hits_target_rho,
         test_waterfilling_inverse_to_importance,
         test_none_branch_produces_zero_sigma,
         test_build_model_from_scratch_skips_load,

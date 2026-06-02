@@ -95,15 +95,37 @@ def waterfilling_sigma(
     rdp_budget: float,
     eps_s: float = 1e-12,
 ) -> torch.Tensor:
-    """Channel-WF: sigma_c = kappa * sqrt(delta_c) / s_c^{1/4}."""
+    """
+    Channel-WF allocation (Theorem 1 of the paper).
+
+        sigma_c = kappa * sqrt(delta_c) / s_c^{1/4}
+        kappa   = sqrt( (sum_c delta_c * sqrt(s_c)) / (2 * rdp_budget) )
+
+    Calibrated so that the multi-coordinate Gaussian mechanism's zCDP
+    cost  sum_c delta_c^2 / (2 * sigma_c^2)  equals exactly rdp_budget
+    (Bun-Steinke 2016 Prop. 1.4 for the per-coordinate Gaussian).
+
+    NOTE on the factor of 2 in the denominator: an earlier version
+    omitted it, which calibrated sigma against a budget of 2*rho rather
+    than rho. The mechanism was still privacy-safe (over-paid privacy
+    by sqrt(2) in sigma, so actual epsilon was smaller than reported),
+    but the reported epsilon did not match the released sigma. Fixed
+    here so reported epsilon == actual user-level epsilon under the
+    sample-once + public-proxy threat model.
+    """
     s = importances.clamp(min=eps_s)
-    kappa = ((deltas * s.sqrt()).sum() / rdp_budget).sqrt()
+    kappa = ((deltas * s.sqrt()).sum() / (2.0 * rdp_budget)).sqrt()
     return kappa * deltas.sqrt() / s.pow(0.25)
 
 
 def uniform_sigma(deltas: torch.Tensor, rdp_budget: float) -> torch.Tensor:
-    """Uniform: same sigma for all channels."""
-    sigma = (deltas.pow(2).sum() / rdp_budget).sqrt()
+    """
+    Uniform allocation: same sigma for every channel, calibrated so
+    that  sum_c delta_c^2 / (2 * sigma^2) = rdp_budget.
+
+    See waterfilling_sigma for the note on the factor of 2.
+    """
+    sigma = (deltas.pow(2).sum() / (2.0 * rdp_budget)).sqrt()
     return sigma.expand(deltas.shape[0]).clone()
 
 
