@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 Smoke test for diagnostic A/B/C changes in phase1_gkd_distill_v2.py.
 

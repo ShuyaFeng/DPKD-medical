@@ -6,26 +6,35 @@
 \appendix
 
 % ---------------------------------------------------------------------
-\section{Pseudocode: sample-once distillation}
+\section{Pseudocode: sample-once channel-pruning feature release}
 \label{app:pseudocode}
 
 Algorithm~\ref{alg:precompute} gives the precompute routine that
-implements the sample-once-per-image release model
-(\S\ref{ssec:threat}, \S\ref{ssec:impl}). It is invoked once before
-the student training loop. Throughout, $\phi_T$ denotes the (frozen)
-teacher encoder, $\mathrm{clip}(\cdot;\widehat{c})$ per-channel $L_2$
-clipping to caps $\widehat{c}$, and $\eta\sim\mathcal{N}(0,\sigma^2)$
-draws independent Gaussian noise per channel and spatial location.
+implements the sample-once-per-image release with the channel-pruning
+threshold mechanism (\S\ref{ssec:threat}, \S\ref{ssec:thr},
+\S\ref{ssec:impl}). It is invoked once before the student-adapter
+training loop. Throughout, $\phi_T$ denotes the (frozen) teacher
+encoder, $\mathrm{clip}(\cdot;\widehat{c})$ per-channel $L_2$ clipping
+to caps $\widehat{c}$, and $\eta\sim\mathcal{N}(0,\sigma^2)$ draws
+independent Gaussian noise per channel and spatial location.
 
 \begin{algorithm}[t]
-\caption{Sample-once precompute of noisy teacher bottlenecks.}
+\caption{Sample-once precompute of pruned-and-noisy teacher bottlenecks.}
 \label{alg:precompute}
 \begin{algorithmic}[1]
-\Require teacher $\phi_T$; training images $\{x_i\}_{i=1}^{N}$;
-         per-channel caps $\widehat{c}\in\mathbb{R}^{C}$;
-         per-channel noise scales $\sigma\in\mathbb{R}^{C}$
-\Ensure  noisy bottleneck cache
+\Require teacher $\phi_T$ (frozen); private training images $\{x_i\}_{i=1}^{N}$;
+         per-channel caps $\widehat{c}\in\mathbb{R}^{C}$
+         (computed once on public proxy);
+         per-channel importance $\widehat{s}\in\mathbb{R}^{C}$
+         (computed once on public proxy);
+         keep-fraction $k\in(0,1]$; budget $\rho_{\mathrm{rel}}$;
+         sensitivity $\Delta = 2/K$.
+\Ensure  noisy pruned bottleneck cache
          $\mathcal{C}:\mathrm{img\_id}\!\to\!\mathbb{R}^{C\times H\times W}$
+\State $\mathcal{A} \gets \{$top $\lfloor kC \rfloor$ indices of $\widehat{s}\}$
+       \Comment{active set; complement is permanently dropped}
+\State $\sigma_{\mathcal{A}} \gets \sqrt{|\mathcal{A}|\,\Delta^{2} / (2\rho_{\mathrm{rel}})}$
+       \Comment{uniform allocation on active set; equivalent to WF on $\mathcal{A}$}
 \State $\mathcal{C} \gets \emptyset$
 \For{$i = 1,\dots,N$}
   \State $z_i \gets \phi_T(x_i)$
@@ -33,19 +42,59 @@ draws independent Gaussian noise per channel and spatial location.
   \State $z_i' \gets \mathrm{clip}(z_i;\widehat{c}) / \widehat{c}$
          \Comment{per-channel norm $\le 1$}
   \State sample $\eta_i \in \mathbb{R}^{C\times H\times W}$ with
-         $\eta_i^{(c)} \!\sim\! \mathcal{N}(0,\sigma_c^{2})$
-  \State $\widetilde{z}_i \gets (z_i' + \eta_i)\odot\widehat{c}$
-         \Comment{denormalise}
+         $\eta_i^{(c)} \!\sim\! \mathcal{N}(0,\sigma_{\mathcal{A}}^{2})$
+         for $c\in\mathcal{A}$, and $\eta_i^{(c)}\equiv 0$ otherwise
+  \State $\widetilde{z}_i' \gets z_i' + \eta_i$
+  \State $\widetilde{z}_i'^{(c)} \gets 0$ for every $c\notin\mathcal{A}$
+         \Comment{permanent zero on inactive channels}
+  \State $\widetilde{z}_i \gets \widetilde{z}_i' \odot \widehat{c}$
+         \Comment{denormalise (post-processing)}
   \State $\mathcal{C}[\mathrm{img\_id}(x_i)] \gets \widetilde{z}_i$
 \EndFor
 \State \Return $\mathcal{C}$
 \end{algorithmic}
 \end{algorithm}
 
-\noindent During student training, the inner loop's teacher path is
-replaced by a single look-up $\widetilde{z}_i \leftarrow
-\mathcal{C}[\mathrm{img\_id}(x_i)]$, eliminating both per-iteration
-teacher queries and per-iteration noise samples.
+\paragraph{Adapter training (no GT, public-proxy only).}
+Algorithm~\ref{alg:adapter} trains the post-processing adapter
+$h_\theta$ entirely on the public proxy. The adapter consumes pairs
+of (pruned-noisy, clean) bottlenecks computed by running
+$\phi_T$ twice on each public image \textemdash{} once cleanly and
+once through the same threshold release with the same $\sigma$ used
+on the private set. The optimisation objective is MSE in the
+normalised feature space (Eq.~\eqref{eq:adapter} of the body).
+
+\begin{algorithm}[t]
+\caption{Public-proxy adapter for thresholded feature release.}
+\label{alg:adapter}
+\begin{algorithmic}[1]
+\Require teacher $\phi_T$ (frozen); public proxy images $\{x'_j\}_{j=1}^{M}$;
+         active set $\mathcal{A}$ and noise scale $\sigma_{\mathcal{A}}$
+         from Algorithm~\ref{alg:precompute};
+         residual conv adapter $h_\theta$; learning rate $\eta_{\mathrm{lr}}$.
+\Ensure  trained adapter $h_{\theta^\star}$
+\For{epoch $= 1,\dots,E$}
+  \For{batch $\mathcal{B}\subseteq\{1,\dots,M\}$}
+    \State $z'_{\mathcal{B}} \gets \mathrm{clip}(\phi_T(x'_\mathcal{B});\widehat{c})/\widehat{c}$
+    \State $\widetilde{z}'_{\mathcal{B}} \gets z'_{\mathcal{B}}$;
+           add $\mathcal{N}(0,\sigma_{\mathcal{A}}^2)$ on $\mathcal{A}$;
+           set off-$\mathcal{A}$ channels to $0$
+    \State $\theta \gets \theta - \eta_{\mathrm{lr}}\,
+           \nabla_\theta\,\bigl\|\,h_\theta(\widetilde{z}'_{\mathcal{B}})
+                                 - z'_{\mathcal{B}}\bigr\|_2^{2}$
+  \EndFor
+\EndFor
+\State \Return $h_{\theta}$
+\end{algorithmic}
+\end{algorithm}
+
+\noindent During downstream inference, the released $\widetilde{z}_i$
+is passed through $h_{\theta^\star}$ and then through the (frozen)
+teacher decoder. The composition $h_{\theta^\star}\!\circ\!
+\mathrm{cache\_lookup}\!\circ\!\mathrm{decoder}$ is pure
+post-processing of the DP release and inherits the
+$(\varepsilon_{\mathrm{user}},\delta)$-DP guarantee derived in
+\S\ref{ssec:accounting}.
 
 % ---------------------------------------------------------------------
 \section{Full proof of Theorem~\ref{thm:wf}}
@@ -149,6 +198,85 @@ J_{\mathrm{WF}}^{\star} \;\le\; J_{\mathrm{unif}},
 with strict inequality whenever the $\{s_c\}$ are not all equal.
 This establishes the strict-improvement claim of Theorem~\ref{thm:wf}
 and completes the proof. \qed
+
+% ---------------------------------------------------------------------
+\section{Full proof of Theorem~\ref{thm:thr-optimal}}
+\label{app:thr-proof}
+
+We restate the augmented problem from Theorem~\ref{thm:thr-optimal}.
+Let $\mathcal{S}=\{c:s_c>0\}$, $C^\star=|\mathcal{S}|$, and consider
+\begin{equation}
+\min_{\sigma\in(0,\infty]^C}\;
+ \sum_{c=1}^C s_c\,\sigma_c^{2}
+ \quad\text{s.t.}\quad
+ \sum_{c=1}^C \frac{\Delta_c^2}{2\sigma_c^2} \;\le\; \rho_{\mathrm{rel}},
+\label{eq:thr-opt-restated}
+\end{equation}
+with the conventions $s_c\sigma_c^{2}=0$ when $s_c=0$ and
+$\Delta_c^2/\sigma_c^2 = 0$ when $\sigma_c=\infty$.
+
+\paragraph{Inactive coordinates are at $\infty$ in every optimum.}
+Fix a feasible $\sigma$ with $\sigma_{c_0}<\infty$ for some
+$c_0\notin\mathcal{S}$ (so $s_{c_0}=0$). Replacing $\sigma_{c_0}$ by
+$\infty$ leaves the objective unchanged (it contributes $s_{c_0}\sigma_{c_0}^2 = 0$
+in both cases) and decreases the constraint left-hand side by
+$\Delta_{c_0}^2/(2\sigma_{c_0}^2) > 0$, so the modified $\sigma$ is
+still feasible. The decreased slack can then be redistributed by
+\emph{decreasing} $\sigma_c$ on some $c\in\mathcal{S}$, which
+\emph{strictly decreases} the objective $\sum_c s_c\sigma_c^2$ since
+$s_c>0$ there. Therefore the original $\sigma$ cannot be optimal:
+\emph{every} optimum sets $\sigma_c=\infty$ on $\{1,\dots,C\}\setminus\mathcal{S}$.
+
+\paragraph{Restriction to $\mathcal{S}$ reproduces Theorem~\ref{thm:wf}.}
+Once $\sigma_c=\infty$ for $c\notin\mathcal{S}$, those coordinates
+contribute $0$ to both objective and constraint of
+\eqref{eq:thr-opt-restated}. The residual problem is
+\begin{equation*}
+\min_{\{\sigma_c\}_{c\in\mathcal{S}}>0}
+ \sum_{c\in\mathcal{S}} s_c\,\sigma_c^{2}
+ \quad\text{s.t.}\quad
+ \sum_{c\in\mathcal{S}} \frac{\Delta_c^2}{2\sigma_c^2} \le \rho_{\mathrm{rel}},
+\end{equation*}
+which is exactly the setting of Theorem~\ref{thm:wf} on the index
+set $\mathcal{S}$. Applying Theorem~\ref{thm:wf} yields
+$\sigma^{\star}_c = \kappa_{\mathcal{S}}\sqrt{\Delta_c}/s_c^{1/4}$ for
+$c\in\mathcal{S}$, with normaliser
+$\kappa_{\mathcal{S}} = \bigl(\sum_{c\in\mathcal{S}}\Delta_c\sqrt{s_c} / (2\rho_{\mathrm{rel}})\bigr)^{1/2}$.
+
+\paragraph{Optimal objective and strict improvement over plain WF.}
+By \eqref{eq:wf-obj} restricted to $\mathcal{S}$,
+\begin{equation}
+J^{\star}_{\mathrm{thr}}
+ \;=\;
+ \frac{1}{2\rho_{\mathrm{rel}}}
+ \Bigl(\sum_{c\in\mathcal{S}}\Delta_c\sqrt{s_c}\Bigr)^{2},
+\end{equation}
+exactly as claimed in \eqref{eq:thr-obj}. The ratio against plain
+WF on all $C$ channels (Eq.~\eqref{eq:wf-obj} of
+Appendix~\ref{app:proof}) is
+\begin{equation*}
+\frac{J^{\star}_{\mathrm{thr}}}{J^{\star}_{\mathrm{WF}}}
+ \;=\;
+ \Biggl(
+   \frac{\sum_{c\in\mathcal{S}}\Delta_c\sqrt{s_c}}
+        {\sum_{c=1}^{C}\Delta_c\sqrt{s_c}}
+ \Biggr)^{2},
+\end{equation*}
+which is strictly less than $1$ whenever $\mathcal{S}\neq\{1,\dots,C\}$
+(equivalently, whenever any $s_c=0$). This completes the proof. \qed
+
+\paragraph{Practical consequence.}
+Real importance vectors are not sparse, but the bottleneck importance
+on segmentation U-Nets is concentrated: in our DRIVE experiments the
+ratio $s_{\max}/s_{\min}\approx 2$ across all channels yet the
+top-$10\%$ of channels by importance carries enough task-relevant
+information that releasing only this active set (and zeroing the
+complement) recovers $\!\sim\!56\%$ of the privacy--utility gap at
+$\varepsilon\!=\!32$, versus the $0\%$ that plain WF recovers
+(\S\ref{sec:experiments}). Theorem~\ref{thm:thr-optimal} is the
+exact statement for the sparse limit; the threshold mechanism
+\eqref{eq:thr-release} is its operational generalisation to flat
+importance vectors.
 
 % ---------------------------------------------------------------------
 %  BibTeX entries to add to references.bib (paste into your .bib):

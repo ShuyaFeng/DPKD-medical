@@ -49,6 +49,39 @@ for the exact math and the exact code path.
 
 ---
 
+## 0.5 Threat model — the assumptions every later phase rests on
+
+Everything that follows assumes:
+
+| Property | Value | Why it matters |
+|---|---|---|
+| Privacy unit | **Per-patient** | The only clinically meaningful unit. |
+| Per-patient image cap on DRIVE | **k = 1** (one image per patient) | Lets `per-image release = per-patient release` collapse in §6.4. Breaks on datasets with k > 1 (e.g. MIMIC-CXR, k ≤ 4). |
+| Private data | DRIVE **images AND vessel masks** | The teacher was trained on DRIVE image-label pairs, so both encode per-patient information. Whatever protects DRIVE has to protect both. |
+| Public data | HRF (or STARE / CHASE-DB1) | Used in Phase A to compute caps + importance. No DRIVE byte ever enters Phase A. |
+| Mechanism placement | **Feature release** — add Gaussian noise to teacher bottleneck features of each DRIVE image | The "released artifact" is the cached noisy feature tensor. Anything downstream is post-processing **of that tensor**. |
+| Sample-once | Each DRIVE image released **exactly once**, cached, reused for all 40k iterations | Avoids per-iteration composition blow-up. With k = 1 this is also exactly one release per patient. |
+| Accountant | Rényi DP / zCDP, converted to (ε, δ)-DP via Bun-Steinke at report time | Tightest for Gaussian. |
+
+### 0.5.1 The GT-label caveat (open question, not yet closed)
+
+DRIVE's vessel masks were curated from DRIVE images by expert annotators, so logically they belong to the private set — anything that learns from them learns from the private data. Phase C's student computes a **task loss against the ground-truth mask** (`CE + 3·Dice`), which is **not** a function of the cached noisy features; it is a direct data-dependent operation on the private labels.
+
+What this means for the ε we report:
+
+- The cached noisy features are **(ε, δ)-DP** by §6.4 — that part is solid.
+- The student model, as a function of (cached features) **and** (private labels), is **not** automatically (ε, δ)-DP at the same ε. The label-side gradient flow needs its own accounting.
+
+Three ways to close this gap, none committed:
+
+1. **Treat labels as public auxiliary.** Defensible-ish on DRIVE (vessel annotations are a clinical interpretation, not raw patient identifiers) but weakens fast when extending to BraTS / MIMIC where labels are diagnoses.
+2. **DP-SGD on the task-loss path** for the student, on top of the feature release. Adds a second ε that has to compose with the feature-release ε.
+3. **Drop the task loss entirely**, train the student purely on cached noisy features (pure feature-matching). Cleanest privacy story; gives an upper bound on what "pure post-processing" can achieve, at the cost of forgoing GT supervision.
+
+**Until one is picked**, the safest framing in writeups is: report ε as "ε of the released features", and disclose the label-side data dependence as a methodological limitation — **not** as the student model's user-level ε.
+
+---
+
 ## 1. "I want to do X" — jump table
 
 | What you want to do | Run this | Section |
@@ -223,12 +256,16 @@ For 40,000 iterations:
 3. Look up the cached noisy teacher bottleneck by image_id
    (no fresh noise! no fresh teacher query!)
 4. Feature loss = MSE(adapter(student_bn), cached_noisy_target)
-5. Task loss = CE + 3·Dice on the ground-truth mask
+5. Task loss = CE + 3·Dice on the ground-truth mask  *(see §0.5.1 — open privacy question)*
 6. Total = task + λ · feature
 7. Backprop → update student + adapter only
 
-By DP post-processing immunity, the resulting student model is
-(ε, δ)-DP because the cached features are.
+By DP post-processing immunity, the **cached noisy features** are
+(ε, δ)-DP and so is anything computed purely from them. The
+*student model* trained with step 5 above also consumes the
+**private GT mask**, so its DP status with respect to the labels is
+a separate question (§0.5.1) — the ε we report covers the feature
+release only.
 
 ### One-shot command for Phase B + C
 
@@ -330,7 +367,11 @@ noisy_cache[img_id(x_i)] = z_noisy.detach().cpu()
   budget allocation).
 - Each image's release uses only that image's data → **disjoint
   mechanisms** → **parallel composition** → the union of all releases
-  is still `ρ_rel`-zCDP at the user level.
+  is still `ρ_rel`-zCDP **per image**.
+- **DRIVE has k = 1 image per patient** (§0.5), so per-image release
+  collapses to per-patient release: `ρ_user = ρ_rel`. This identity is
+  dataset-specific — MIMIC-CXR (k ≤ 4) needs extra composition for
+  those patients.
 - Caps and importance came from public HRF → `ρ_caps = ρ_imp = 0`.
 - Total: `ρ_user = 0 + 0 + ρ_rel = ρ_total`.
 - Convert back via Bun-Steinke: `ε_user = ε` (the value you passed via
@@ -420,8 +461,12 @@ python3 /data/user/home/ialam/mmsegmentation/tools/analysis/budget_split_analysi
    privacy (DP immunity theorem).
 
 3. **The reported ε IS the user-level ε** (no composition blow-up),
-   because (a) caps + importance came from public data, and (b) each
-   training image is released exactly once.
+   because (a) caps + importance came from public data, (b) each
+   training image is released exactly once, **and (c) DRIVE has
+   k = 1 image per patient** so per-image = per-patient. (c) is
+   dataset-specific (§0.5). Note: this ε is for the released
+   *features* only — the student's task loss on private GT labels is
+   a separate, currently-unaccounted data-dependent path (§0.5.1).
 
 ### Two conceptual confusions, resolved
 

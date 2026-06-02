@@ -1,0 +1,26 @@
+{
+  "clean": 0.6200880408287048,
+  "eps_list": [
+    8.0,
+    16.0,
+    32.0
+  ],
+  "eps_8.0": {
+    "baseline_no_adapter": 0.21045263409614562,
+    "with_adapter": 0.29127628207206724,
+    "adapter_lift": 0.08082364797592162,
+    "clean_gap_closed": 0.19730630372166383
+  },
+  "eps_16.0": {
+    "baseline_no_adapter": 0.2592824578285217,
+    "with_adapter": 0.3241167366504669,
+    "adapter_lift": 0.0648342788219452,
+    "clean_gap_closed": 0.17969311417753836
+  },
+  "eps_32.0": {
+    "baseline_no_adapter": 0.34104183316230774,
+    "with_adapter": 0.39147075414657595,
+    "adapter_lift": 0.05042892098426821,
+    "clean_gap_closed": 0.18071889027266966
+  }
+}
