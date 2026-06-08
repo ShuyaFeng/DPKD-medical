@@ -6,98 +6,61 @@
 \appendix
 
 % ---------------------------------------------------------------------
-\section{Pseudocode: sample-once channel-pruning feature release}
+\section{Pseudocode: sample-once PATE feature aggregation}
 \label{app:pseudocode}
 
 Algorithm~\ref{alg:precompute} gives the precompute routine that
-implements the sample-once-per-image release with the channel-pruning
-threshold mechanism (\S\ref{ssec:threat}, \S\ref{ssec:thr},
-\S\ref{ssec:impl}). It is invoked once before the student-adapter
-training loop. Throughout, $\phi_T$ denotes the (frozen) teacher
-encoder, $\mathrm{clip}(\cdot;\widehat{c})$ per-channel $L_2$ clipping
-to caps $\widehat{c}$, and $\eta\sim\mathcal{N}(0,\sigma^2)$ draws
+implements the sample-once-per-image release with the PATE
+multi-teacher aggregation mechanism (\S\ref{ssec:threat},
+\S\ref{ssec:pate}, \S\ref{ssec:impl}). It is invoked once before the
+student training loop. Throughout, $\phi_T^{(k)}$ denotes teacher $k$'s
+(frozen) encoder trained on cohort $\mathcal{D}_k$,
+$\mathrm{clip}(\cdot;\widehat{c}^{(k)})$ per-channel $L_2$ clipping to
+caps $\widehat{c}^{(k)}$, and $\eta\sim\mathcal{N}(0,\sigma^2)$ draws
 independent Gaussian noise per channel and spatial location.
 
 \begin{algorithm}[t]
-\caption{Sample-once precompute of pruned-and-noisy teacher bottlenecks.}
+\caption{Sample-once precompute of PATE-aggregated noisy bottlenecks.}
 \label{alg:precompute}
 \begin{algorithmic}[1]
-\Require teacher $\phi_T$ (frozen); private training images $\{x_i\}_{i=1}^{N}$;
-         per-channel caps $\widehat{c}\in\mathbb{R}^{C}$
-         (computed once on public proxy);
-         per-channel importance $\widehat{s}\in\mathbb{R}^{C}$
-         (computed once on public proxy);
-         keep-fraction $k\in(0,1]$; budget $\rho_{\mathrm{rel}}$;
-         sensitivity $\Delta = 2/K$.
-\Ensure  noisy pruned bottleneck cache
+\Require $K$ teachers $\{\phi_T^{(k)}\}_{k=1}^K$ trained on disjoint
+         cohorts; private training images $\{x_i\}_{i=1}^{N}$;
+         per-teacher per-channel caps $\widehat{c}^{(k)} \in \mathbb{R}^{C}$
+         (computed once on public proxy); budget $\rho_{\mathrm{rel}}$.
+\Ensure  noisy bottleneck cache
          $\mathcal{C}:\mathrm{img\_id}\!\to\!\mathbb{R}^{C\times H\times W}$
-\State $\mathcal{A} \gets \{$top $\lfloor kC \rfloor$ indices of $\widehat{s}\}$
-       \Comment{active set; complement is permanently dropped}
-\State $\sigma_{\mathcal{A}} \gets \sqrt{|\mathcal{A}|\,\Delta^{2} / (2\rho_{\mathrm{rel}})}$
-       \Comment{uniform allocation on active set; equivalent to WF on $\mathcal{A}$}
+\State $\Delta \gets 2/K$                                            \Comment{Theorem~\ref{thm:pate-sens}}
+\State $\sigma \gets \sqrt{C\,\Delta^{2} / (2\rho_{\mathrm{rel}})}$    \Comment{uniform allocation on aggregate}
 \State $\mathcal{C} \gets \emptyset$
 \For{$i = 1,\dots,N$}
-  \State $z_i \gets \phi_T(x_i)$
-         \Comment{forward through encoder, frozen}
-  \State $z_i' \gets \mathrm{clip}(z_i;\widehat{c}) / \widehat{c}$
-         \Comment{per-channel norm $\le 1$}
+  \For{$k = 1,\dots,K$}
+    \State $z_i^{(k)} \gets \phi_T^{(k)}(x_i)$                         \Comment{teacher $k$ forward}
+    \State $z_i^{\prime (k)} \gets \mathrm{clip}(z_i^{(k)}; \widehat{c}^{(k)}) / \widehat{c}^{(k)}$
+                                                                       \Comment{per-channel norm $\le 1$}
+  \EndFor
+  \State $\bar z_i \gets \tfrac{1}{K}\sum_{k=1}^{K} z_i^{\prime (k)}$  \Comment{PATE aggregate}
   \State sample $\eta_i \in \mathbb{R}^{C\times H\times W}$ with
-         $\eta_i^{(c)} \!\sim\! \mathcal{N}(0,\sigma_{\mathcal{A}}^{2})$
-         for $c\in\mathcal{A}$, and $\eta_i^{(c)}\equiv 0$ otherwise
-  \State $\widetilde{z}_i' \gets z_i' + \eta_i$
-  \State $\widetilde{z}_i'^{(c)} \gets 0$ for every $c\notin\mathcal{A}$
-         \Comment{permanent zero on inactive channels}
-  \State $\widetilde{z}_i \gets \widetilde{z}_i' \odot \widehat{c}$
-         \Comment{denormalise (post-processing)}
+         $\eta_i^{(c)} \!\sim\! \mathcal{N}(0,\sigma^{2})$
+  \State $\widetilde{z}_i \gets (\bar z_i + \eta_i)\odot \widehat{c}^{\mathrm{ref}}$
+                                                                       \Comment{denormalise w/ ref cap}
   \State $\mathcal{C}[\mathrm{img\_id}(x_i)] \gets \widetilde{z}_i$
 \EndFor
 \State \Return $\mathcal{C}$
 \end{algorithmic}
 \end{algorithm}
 
-\paragraph{Adapter training (no GT, public-proxy only).}
-Algorithm~\ref{alg:adapter} trains the post-processing adapter
-$h_\theta$ entirely on the public proxy. The adapter consumes pairs
-of (pruned-noisy, clean) bottlenecks computed by running
-$\phi_T$ twice on each public image \textemdash{} once cleanly and
-once through the same threshold release with the same $\sigma$ used
-on the private set. The optimisation objective is MSE in the
-normalised feature space (Eq.~\eqref{eq:adapter} of the body).
-
-\begin{algorithm}[t]
-\caption{Public-proxy adapter for thresholded feature release.}
-\label{alg:adapter}
-\begin{algorithmic}[1]
-\Require teacher $\phi_T$ (frozen); public proxy images $\{x'_j\}_{j=1}^{M}$;
-         active set $\mathcal{A}$ and noise scale $\sigma_{\mathcal{A}}$
-         from Algorithm~\ref{alg:precompute};
-         residual conv adapter $h_\theta$; learning rate $\eta_{\mathrm{lr}}$.
-\Ensure  trained adapter $h_{\theta^\star}$
-\For{epoch $= 1,\dots,E$}
-  \For{batch $\mathcal{B}\subseteq\{1,\dots,M\}$}
-    \State $z'_{\mathcal{B}} \gets \mathrm{clip}(\phi_T(x'_\mathcal{B});\widehat{c})/\widehat{c}$
-    \State $\widetilde{z}'_{\mathcal{B}} \gets z'_{\mathcal{B}}$;
-           add $\mathcal{N}(0,\sigma_{\mathcal{A}}^2)$ on $\mathcal{A}$;
-           set off-$\mathcal{A}$ channels to $0$
-    \State $\theta \gets \theta - \eta_{\mathrm{lr}}\,
-           \nabla_\theta\,\bigl\|\,h_\theta(\widetilde{z}'_{\mathcal{B}})
-                                 - z'_{\mathcal{B}}\bigr\|_2^{2}$
-  \EndFor
-\EndFor
-\State \Return $h_{\theta}$
-\end{algorithmic}
-\end{algorithm}
-
-\noindent During downstream inference, the released $\widetilde{z}_i$
-is passed through $h_{\theta^\star}$ and then through the (frozen)
-teacher decoder. The composition $h_{\theta^\star}\!\circ\!
-\mathrm{cache\_lookup}\!\circ\!\mathrm{decoder}$ is pure
-post-processing of the DP release and inherits the
-$(\varepsilon_{\mathrm{user}},\delta)$-DP guarantee derived in
-\S\ref{ssec:accounting}.
+\noindent During student training, the inner loop's teacher path is
+replaced by a single look-up $\widetilde{z}_i \leftarrow
+\mathcal{C}[\mathrm{img\_id}(x_i)]$, eliminating both per-iteration
+teacher queries and per-iteration noise samples. The reference cap
+$\widehat{c}^{\mathrm{ref}}$ in line~10 of
+Algorithm~\ref{alg:precompute} can be any per-channel scaling
+consistent across the dataset (we use the mean of $\widehat{c}^{(k)}$
+across $k$); the choice is post-processing and does not affect the
+DP guarantee.
 
 % ---------------------------------------------------------------------
-\section{Full proof of Theorem~\ref{thm:wf}}
+\section{Full proof of Theorem~\ref{thm:wf} (CANAL closed form)}
 \label{app:proof}
 
 We restate the optimisation problem from \eqref{eq:opt} for
@@ -139,15 +102,7 @@ u_c^{\star} \;=\; \sqrt{\frac{2\,s_c}{\lambda\,\Delta_c^{2}}}
 
 \paragraph{Solving for $\lambda$ via the active constraint.}
 Substitute back into $\sum_c \tfrac{\Delta_c^{2}}{2}u_c^{\star} =
-\rho_{\mathrm{rel}}$:
-\begin{equation*}
-\sum_{c=1}^{C}\frac{\Delta_c^{2}}{2}\sqrt{\frac{2}{\lambda}}\,\frac{\sqrt{s_c}}{\Delta_c}
- \;=\; \rho_{\mathrm{rel}}
-\;\;\Longrightarrow\;\;
-\sqrt{\frac{1}{2\lambda}}\,\sum_{c=1}^{C}\Delta_c\sqrt{s_c}
- \;=\; \rho_{\mathrm{rel}}.
-\end{equation*}
-Solving for $\lambda$:
+\rho_{\mathrm{rel}}$ and solve:
 \begin{equation*}
 \lambda \;=\; \frac{1}{2\,\rho_{\mathrm{rel}}^{2}}
               \Bigl(\sum_{c=1}^{C}\Delta_c\sqrt{s_c}\Bigr)^{2}.
@@ -159,124 +114,89 @@ $\sigma_c^{\star} = 1/\sqrt{u_c^{\star}}$:
 \begin{equation*}
 \sigma_c^{\star}
  \;=\;
- \frac{1}{(2/\lambda)^{1/4}}\,
- \frac{\Delta_c^{1/2}}{s_c^{1/4}}
- \;=\;
  \underbrace{\sqrt{\frac{1}{2\,\rho_{\mathrm{rel}}}\sum_{c=1}^{C}\Delta_c\sqrt{s_c}}}_{\displaystyle\kappa}
  \;\frac{\sqrt{\Delta_c}}{s_c^{1/4}},
 \end{equation*}
 which is exactly \eqref{eq:wf}.
 
-\paragraph{Optimal objective and strict improvement.}
+\paragraph{Optimal objective and $R^{1/4}$ bound.}
 The optimal value of the original objective is
 \begin{equation}
 J_{\mathrm{WF}}^{\star}
- \;=\; \sum_{c=1}^{C} s_c\,(\sigma_c^{\star})^{2}
- \;=\; \kappa^{2}\sum_{c=1}^{C}\Delta_c\sqrt{s_c}
  \;=\; \frac{1}{2\,\rho_{\mathrm{rel}}}
        \Bigl(\sum_{c=1}^{C}\Delta_c\sqrt{s_c}\Bigr)^{2}.
 \label{eq:wf-obj}
 \end{equation}
 For uniform $\sigma_{\mathrm{unif}}$ saturating the same budget,
 $\sigma_{\mathrm{unif}}^{2} = (\sum_c \Delta_c^{2})/(2\,\rho_{\mathrm{rel}})$,
-so the uniform-allocation objective is
+the uniform-allocation objective is
 \begin{equation}
 J_{\mathrm{unif}}
- \;=\; \sigma_{\mathrm{unif}}^{2}\sum_{c}s_c
  \;=\; \frac{1}{2\,\rho_{\mathrm{rel}}}
        \Bigl(\sum_{c}\Delta_c^{2}\Bigr)\Bigl(\sum_{c}s_c\Bigr).
 \label{eq:unif-obj}
 \end{equation}
-Comparing \eqref{eq:wf-obj} and \eqref{eq:unif-obj} via Cauchy--Schwarz
-applied to the vectors $(\Delta_c)$ and $(\Delta_c\sqrt{s_c})$, or
-directly via $(\sum_c \Delta_c\sqrt{s_c})^{2} \le
+By Cauchy--Schwarz $(\sum_c \Delta_c\sqrt{s_c})^{2} \le
 (\sum_c \Delta_c^{2})(\sum_c s_c)$ with equality iff $s_c$ is
-constant, we obtain
-\begin{equation*}
-J_{\mathrm{WF}}^{\star} \;\le\; J_{\mathrm{unif}},
-\end{equation*}
-with strict inequality whenever the $\{s_c\}$ are not all equal.
-This establishes the strict-improvement claim of Theorem~\ref{thm:wf}
-and completes the proof. \qed
+constant, so $J_{\mathrm{WF}}^{\star} \le J_{\mathrm{unif}}$. Strict
+inequality holds whenever the $\{s_c\}$ are not all equal; with
+$\Delta_c \equiv \Delta$ the ratio $\sigma^{\star}_c / \sigma^{\star}_{c'} =
+(s_{c'}/s_c)^{1/4}$, bounded by $R^{1/4}$ where $R = s_{\max}/s_{\min}$.
+This establishes Corollary~\ref{cor:r14} and Theorem~\ref{thm:wf}.\qed
 
 % ---------------------------------------------------------------------
-\section{Full proof of Theorem~\ref{thm:thr-optimal}}
-\label{app:thr-proof}
+\section{Full proof of Theorem~\ref{thm:pate-sens} (PATE aggregate sensitivity)}
+\label{app:pate-proof}
 
-We restate the augmented problem from Theorem~\ref{thm:thr-optimal}.
-Let $\mathcal{S}=\{c:s_c>0\}$, $C^\star=|\mathcal{S}|$, and consider
-\begin{equation}
-\min_{\sigma\in(0,\infty]^C}\;
- \sum_{c=1}^C s_c\,\sigma_c^{2}
- \quad\text{s.t.}\quad
- \sum_{c=1}^C \frac{\Delta_c^2}{2\sigma_c^2} \;\le\; \rho_{\mathrm{rel}},
-\label{eq:thr-opt-restated}
-\end{equation}
-with the conventions $s_c\sigma_c^{2}=0$ when $s_c=0$ and
-$\Delta_c^2/\sigma_c^2 = 0$ when $\sigma_c=\infty$.
+We restate. Let $\{\phi_T^{(k)}\}_{k=1}^K$ be teacher encoders trained
+on disjoint patient cohorts $\mathcal{D}_k$, and let
+$\mathrm{norm}(\cdot;\widehat{c}^{(k)})$ denote per-channel clipping
+to cap $\widehat{c}^{(k)}$ followed by per-channel division by the
+cap, so that each channel of $\mathrm{norm}(\phi_T^{(k)}(x);
+\widehat{c}^{(k)})$ has $L_2$ norm $\le 1$.
 
-\paragraph{Inactive coordinates are at $\infty$ in every optimum.}
-Fix a feasible $\sigma$ with $\sigma_{c_0}<\infty$ for some
-$c_0\notin\mathcal{S}$ (so $s_{c_0}=0$). Replacing $\sigma_{c_0}$ by
-$\infty$ leaves the objective unchanged (it contributes $s_{c_0}\sigma_{c_0}^2 = 0$
-in both cases) and decreases the constraint left-hand side by
-$\Delta_{c_0}^2/(2\sigma_{c_0}^2) > 0$, so the modified $\sigma$ is
-still feasible. The decreased slack can then be redistributed by
-\emph{decreasing} $\sigma_c$ on some $c\in\mathcal{S}$, which
-\emph{strictly decreases} the objective $\sum_c s_c\sigma_c^2$ since
-$s_c>0$ there. Therefore the original $\sigma$ cannot be optimal:
-\emph{every} optimum sets $\sigma_c=\infty$ on $\{1,\dots,C\}\setminus\mathcal{S}$.
+\paragraph{Disjoint-cohort effect of a replace-one.}
+Let $\mathcal{D}$ and $\mathcal{D}'$ differ by replacing exactly one
+patient. Because cohorts are disjoint, the replaced patient belongs to
+exactly one cohort, say $\mathcal{D}_{k^\star}$. Teacher $k^\star$ is
+trained on $\mathcal{D}_{k^\star}$ in the original execution and on
+$(\mathcal{D}_{k^\star})'$ in the neighbouring execution; teachers
+$k \ne k^\star$ depend only on their own cohort and therefore satisfy
+$\phi_T^{(k)} = \phi_T^{(k)\prime}$.
 
-\paragraph{Restriction to $\mathcal{S}$ reproduces Theorem~\ref{thm:wf}.}
-Once $\sigma_c=\infty$ for $c\notin\mathcal{S}$, those coordinates
-contribute $0$ to both objective and constraint of
-\eqref{eq:thr-opt-restated}. The residual problem is
+\paragraph{Per-channel bound on the aggregate.}
+Let $\bar z(x;\mathcal{D}) = \tfrac{1}{K}\sum_{k=1}^{K}
+\mathrm{norm}(\phi_T^{(k)}(x); \widehat{c}^{(k)})$ be the aggregate at
+input $x$, where the $\phi_T^{(k)}$ depend implicitly on
+$\mathcal{D}_k$. By the disjoint-cohort observation,
 \begin{equation*}
-\min_{\{\sigma_c\}_{c\in\mathcal{S}}>0}
- \sum_{c\in\mathcal{S}} s_c\,\sigma_c^{2}
- \quad\text{s.t.}\quad
- \sum_{c\in\mathcal{S}} \frac{\Delta_c^2}{2\sigma_c^2} \le \rho_{\mathrm{rel}},
+\bar z(x;\mathcal{D}) - \bar z(x;\mathcal{D}')
+ \;=\; \frac{1}{K}\,\bigl(
+   \mathrm{norm}\bigl(\phi_T^{(k^\star)}(x);\widehat{c}^{(k^\star)}\bigr)
+ \;-\;
+   \mathrm{norm}\bigl(\phi_T^{(k^\star)\prime}(x);\widehat{c}^{(k^\star)}\bigr)
+ \bigr).
 \end{equation*}
-which is exactly the setting of Theorem~\ref{thm:wf} on the index
-set $\mathcal{S}$. Applying Theorem~\ref{thm:wf} yields
-$\sigma^{\star}_c = \kappa_{\mathcal{S}}\sqrt{\Delta_c}/s_c^{1/4}$ for
-$c\in\mathcal{S}$, with normaliser
-$\kappa_{\mathcal{S}} = \bigl(\sum_{c\in\mathcal{S}}\Delta_c\sqrt{s_c} / (2\rho_{\mathrm{rel}})\bigr)^{1/2}$.
-
-\paragraph{Optimal objective and strict improvement over plain WF.}
-By \eqref{eq:wf-obj} restricted to $\mathcal{S}$,
-\begin{equation}
-J^{\star}_{\mathrm{thr}}
- \;=\;
- \frac{1}{2\rho_{\mathrm{rel}}}
- \Bigl(\sum_{c\in\mathcal{S}}\Delta_c\sqrt{s_c}\Bigr)^{2},
-\end{equation}
-exactly as claimed in \eqref{eq:thr-obj}. The ratio against plain
-WF on all $C$ channels (Eq.~\eqref{eq:wf-obj} of
-Appendix~\ref{app:proof}) is
+Both normalised teacher outputs lie in the per-channel unit $L_2$ ball,
+so their difference has per-channel $L_2$ norm $\le 2$ (achieved at
+diametrically opposite points). Dividing by $K$:
 \begin{equation*}
-\frac{J^{\star}_{\mathrm{thr}}}{J^{\star}_{\mathrm{WF}}}
- \;=\;
- \Biggl(
-   \frac{\sum_{c\in\mathcal{S}}\Delta_c\sqrt{s_c}}
-        {\sum_{c=1}^{C}\Delta_c\sqrt{s_c}}
- \Biggr)^{2},
+\bigl\|\, \bar z(x;\mathcal{D})_c - \bar z(x;\mathcal{D}')_c \,\bigr\|_2
+ \;\le\; 2/K \quad \text{for every channel } c.
 \end{equation*}
-which is strictly less than $1$ whenever $\mathcal{S}\neq\{1,\dots,C\}$
-(equivalently, whenever any $s_c=0$). This completes the proof. \qed
+This is the per-channel $L_2$ replace-one sensitivity $\Delta_c$
+required by the Gaussian-mechanism accounting in \eqref{eq:rho-rel},
+so $\Delta_c = 2/K$ as claimed. \qed
 
-\paragraph{Practical consequence.}
-Real importance vectors are not sparse, but the bottleneck importance
-on segmentation U-Nets is concentrated: in our DRIVE experiments the
-ratio $s_{\max}/s_{\min}\approx 2$ across all channels yet the
-top-$10\%$ of channels by importance carries enough task-relevant
-information that releasing only this active set (and zeroing the
-complement) recovers $\!\sim\!56\%$ of the privacy--utility gap at
-$\varepsilon\!=\!32$, versus the $0\%$ that plain WF recovers
-(\S\ref{sec:experiments}). Theorem~\ref{thm:thr-optimal} is the
-exact statement for the sparse limit; the threshold mechanism
-\eqref{eq:thr-release} is its operational generalisation to flat
-importance vectors.
+\paragraph{Consequence.}
+Substituting $\Delta_c = 2/K$ into the uniform allocation of
+\eqref{eq:rho-rel} immediately gives \eqref{eq:pate-sigma}, i.e.,
+$\sigma^{\mathrm{PATE}}(K) = (2/K)\sqrt{C/(2\rho_{\mathrm{rel}})}$,
+showing that the noise scale decreases linearly in $K$ at fixed
+budget. CANAL (Theorem~\ref{thm:wf}) plugs into this with $\Delta_c
+\equiv 2/K$ replacing the $K\!=\!1$ sensitivity and is orthogonal to
+the $K$ scaling: any channel allocation inherits the $K$-fold noise
+reduction.
 
 % ---------------------------------------------------------------------
 %  BibTeX entries to add to references.bib (paste into your .bib):
@@ -295,5 +215,25 @@ importance vectors.
 %    booktitle={IEEE/CVF Winter Conference on Applications of
 %               Computer Vision (WACV)},
 %    year={2024},
+%  }
+%
+%  @inproceedings{papernot2017semi,
+%    title={Semi-Supervised Knowledge Transfer for Deep Learning from
+%           Private Training Data},
+%    author={Papernot, Nicolas and Abadi, Mart\'in and Erlingsson,
+%            \'Ulfar and Goodfellow, Ian and Talwar, Kunal},
+%    booktitle={International Conference on Learning Representations
+%               (ICLR)},
+%    year={2017},
+%  }
+%
+%  @inproceedings{papernot2018scalable,
+%    title={Scalable Private Learning with PATE},
+%    author={Papernot, Nicolas and Song, Shuang and Mironov, Ilya and
+%            Raghunathan, Ananth and Talwar, Kunal and Erlingsson,
+%            \'Ulfar},
+%    booktitle={International Conference on Learning Representations
+%               (ICLR)},
+%    year={2018},
 %  }
 % ---------------------------------------------------------------------
