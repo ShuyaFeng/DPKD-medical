@@ -168,8 +168,9 @@ def compute_caps_and_importance(
     n_grad_imgs = 0
 
     for idx, path in enumerate(image_paths):
-        t = load_image_tensor(path, image_size).unsqueeze(0).to(device)
+        t = load_image_tensor(path, image_size).to(device)
         t = pad_to_divisor(t, pad_divisor)
+        t = t.unsqueeze(0)
 
         # ----- caps: forward + per-channel norm (no grad needed) -----
         with torch.no_grad():
@@ -242,7 +243,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--out-dir",            required=True)
     p.add_argument("--image-size",         type=int, nargs=2, default=(584, 565),
                    help="Resize public images to (H, W) before forwarding.")
-    p.add_argument("--cap-quantile",       type=float, default=0.95,
+    p.add_argument("--cap-quantile",       type=float, default=0.05,
                    help="Conservative percentile (default 0.95) to absorb "
                         "distribution shift between public and private data.")
     p.add_argument("--pad-divisor",        type=int, default=16)
