@@ -1,0 +1,10 @@
+{
+  "H_b": 24,
+  "W_b": 24,
+  "source": "fallback radial-bias (HRF directory missing)",
+  "R_spatial": 2936.216499578024,
+  "saliency_min": 0.00033546262790251185,
+  "saliency_max": 0.9849909030391585,
+  "saliency_mean": 0.17921600726567594,
+  "decision_on_EXP4": "GO-strong"
+}

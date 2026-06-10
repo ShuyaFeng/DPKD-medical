@@ -46,8 +46,8 @@ def infer_bottleneck_spatial(input_size=96, base=32, device="cpu"):
     t = TinyUNet(in_ch=3, num_classes=2, base=base).to(device).eval()
     x = torch.zeros(1, 3, input_size, input_size, device=device)
     with torch.no_grad():
-        z = t.encoder(x) if hasattr(t, "encoder") else t(x, return_bottleneck=True)
-    return z.shape[-2], z.shape[-1]
+        _, _, e3 = t.encode(x)
+    return e3.shape[-2], e3.shape[-1]
 
 
 def load_hrf_or_fallback(hrf_dir: Path, H_b: int, W_b: int):

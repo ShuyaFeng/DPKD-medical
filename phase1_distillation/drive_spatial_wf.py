@@ -97,7 +97,7 @@ def build_spatial_cache(teacher, train_ds, caps, sigma, device, seed,
         for i in range(len(train_ds)):
             x, _ = train_ds[i]
             x = x.unsqueeze(0).to(device)
-            z = teacher.encoder(x) if hasattr(teacher, "encoder") else teacher(x, return_bottleneck=True)
+            _, _, z = teacher.encode(x)
             B, C, H, W = z.shape
             z_norm = clip_and_normalise(z, caps)
             noise_base = torch.randn(B, C, H, W, generator=g, device=device)

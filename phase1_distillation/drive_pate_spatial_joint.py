@@ -64,7 +64,7 @@ def precompute_pate_cache_with_sigma(teachers, caps_list, train_ds,
             # average K teacher bottlenecks (clipped + normalised), each clipped to its own caps
             agg = None
             for k_idx, (t, caps) in enumerate(zip(teachers, caps_list)):
-                z = t.encoder(x) if hasattr(t, "encoder") else t(x, return_bottleneck=True)
+                _, _, z = t.encode(x)
                 z_norm = clip_and_normalise(z, caps.to(device))
                 agg = z_norm if agg is None else agg + z_norm
             agg = agg / K
