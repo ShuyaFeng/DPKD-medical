@@ -8,44 +8,67 @@ as a jump table.
 
 ## 0. The 30-second mental model
 
+The paper pipeline has FIVE layers. The first (sample-once + public
+proxy) is the anchor that makes user-level ε meaningful; PATE and
+channel-pruning sit on top to boost utility; noise is added once; the
+student learns from the cache. See `paper_draft/WACV_STRATEGY.md` for
+the contribution-level map; this file is the operational how-to.
+
 ```
-                 ┌────────────────────────────────────────────┐
-   PUBLIC DATA   │  Phase A — One-time setup (~30 min, once)  │
-   (HRF, etc.)   │  - Download HRF                            │
-                 │  - Run teacher on it → caps + importance   │
-                 │    saved to public_caps.csv,                │
-                 │                  public_importance.csv      │
-                 └──────────────────┬─────────────────────────┘
-                                    │  (these two CSVs are then
-                                    │   reused by EVERY private run)
-                                    ↓
-   PRIVATE       ┌────────────────────────────────────────────┐
-   DRIVE         │  Phase B — DP mechanism (per ε × seed)     │
-   (the actual   │  - Pick target ε                           │
-   patient data) │  - WF allocate σ_c per channel             │
-                 │  - ★ ADD NOISE to teacher bottleneck       │
-                 │     ONCE per image, store to cache         │
-                 └──────────────────┬─────────────────────────┘
-                                    ↓
-                 ┌────────────────────────────────────────────┐
-                 │  Phase C — Student training (no DP work)   │
-                 │  - Student matches cached noisy features    │
-                 │  - This is post-processing → free          │
-                 └──────────────────┬─────────────────────────┘
-                                    ↓
-                 ┌────────────────────────────────────────────┐
-                 │  Phase D — Privacy accounting / reporting  │
-                 │  - Re-derive user-level ε                  │
-                 │  - Tables for paper                        │
-                 └────────────────────────────────────────────┘
+   PUBLIC HRF          PRIVATE DRIVE (N=20 patients, k=1 image each)
+   (caps + importance)         │
+        │                      │
+        ▼                      ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │ Phase A — One-time setup (~30 min, once)                    │
+   │   - Public proxy: caps + importance on HRF (zero ε cost)    │
+   │   - ANCHOR of the whole pipeline (contribution 1.1)         │
+   └────────────────────────────┬─────────────────────────────────┘
+                                ↓
+   ┌──────────────────────────────────────────────────────────────┐
+   │ Phase B — DP mechanism (per ε × seed). FOUR sub-steps:      │
+   │                                                              │
+   │   B1. PATE aggregate (contribution 1.2)                     │
+   │       - K teachers on disjoint cohorts                      │
+   │       - mean of K normalised bottlenecks → Δ = 2/K          │
+   │                                                              │
+   │   B2. Channel-pruning (contribution 1.3)                    │
+   │       - drop bottom-(1−k)C channels by public importance    │
+   │       - keep only top-kC "active" channels                  │
+   │                                                              │
+   │   B3. Allocate σ over the ACTIVE channels                   │
+   │       - uniform (default) OR water-filling (Theorem 1, 1.4) │
+   │       - whole ρ budget spent on active set only             │
+   │                                                              │
+   │   B4. ★ ADD GAUSSIAN NOISE ★  ONCE per patient, cache it    │
+   │       - the only DP-relevant operation in the pipeline      │
+   └────────────────────────────┬─────────────────────────────────┘
+                                ↓
+   ┌──────────────────────────────────────────────────────────────┐
+   │ Phase C — Student training (no DP work, post-processing)    │
+   │   - Student matches cached noisy features (feat loss)       │
+   │   - + GT task loss, mixed via normalized α (1.5)            │
+   └────────────────────────────┬─────────────────────────────────┘
+                                ↓
+   ┌──────────────────────────────────────────────────────────────┐
+   │ Phase D — Privacy accounting / reporting                   │
+   │   - Re-derive user-level ε (= reported ε by construction)   │
+   │   - Tables 3/4 for paper                                    │
+   └──────────────────────────────────────────────────────────────┘
 ```
 
 **Phase A** runs once for the entire project.
-**Phase B + Phase C** are bundled into **one** sbatch per (ε, noise type, seed).
+**Phase B + Phase C** are bundled into **one** job per (ε, seed).
 **Phase D** is a single python invocation when results are in.
 
-The only place **noise is actually added** is **Phase B**. See §6 below
-for the exact math and the exact code path.
+The only place **noise is actually added** is **Phase B4**. See §6 for
+the exact math and code path.
+
+> **Two codebases, same pipeline.** The cluster path uses mmseg
+> (`scripts/phase1_gkd_distill_v2.py`); the paper's empirical results
+> come from the lighter local TinyUNet path
+> (`drive_pate_*.py`, `drive_*_results.json`). Both implement the same
+> five layers; the local path is what produced Tab. 3 / Tab. 4.
 
 ---
 

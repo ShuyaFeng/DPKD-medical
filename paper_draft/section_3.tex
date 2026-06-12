@@ -1,0 +1,533 @@
+% =====================================================================
+%  Section 3 — Method (single-file version)
+%
+%  Self-contained \section that \input's into PaperForReview.tex right
+%  after the Introduction. Appendix material (Theorem 1 proof +
+%  precompute pseudocode) is at the end of THIS file, preceded by
+%  \appendix.
+%
+%  Numbers in the tables come from:
+%    drive_q1_per_iter_vs_sample_once_results.json   (Tab. 1)
+%    tab4_compiled.json                              (Tab. 2)
+%    drive_pate_K_saturation_results.json            (Fig. 1, K-saturation)
+%    drive_importance_sweep_results.json             (Tab. 3, R^{1/4} ceiling)
+%  Re-run privacy_accounting.py + compile_tab4.py to refresh.
+% =====================================================================
+
+\section{Method}
+\label{sec:method}
+
+We organize the method in five subsections. \S\ref{ssec:threat}
+fixes the threat model that makes user-level $\varepsilon$ a meaningful
+quantity. \S\ref{ssec:accounting} states the privacy accounting.
+\S\ref{ssec:wf} gives the general water-filling closed form and
+explains why the channel instantiation hits a structural ceiling on
+RGB fundus. \S\ref{ssec:pate} introduces honest multi-teacher PATE
+aggregation, the empirical workhorse. \S\ref{ssec:alpha} adds a
+normalized loss that exposes the teacher-vs-label gradient mix as a
+single tunable knob. \S\ref{ssec:impl} summarizes the implementation.
+
+% ---------------------------------------------------------------------
+\subsection{Threat model: sample-once-per-image release}
+\label{ssec:threat}
+
+We consider the federated medical setting in which the data-holding
+site processes each patient image \emph{once} through the (private)
+teacher encoder, releases the noisy bottleneck representation, and
+caches it for downstream use. A separate party trains the student
+against these fixed noisy targets. Formally, for training set
+$\mathcal{D}=\{x_i\}_{i=1}^{N}$ and encoder
+$\phi_T : \mathcal{X}\!\to\!\mathbb{R}^{C\times H\times W}$, the
+released objects are
+\begin{equation}
+\widetilde{z}_i \;=\; \mathrm{denorm}\!\bigl(\,\mathrm{norm}(\phi_T(x_i)) + \eta_i\,\bigr),
+\qquad \eta_i \sim \mathcal{N}(0,\,\mathrm{diag}(\sigma^2)),
+\label{eq:release}
+\end{equation}
+where $\mathrm{norm}(\cdot)$ performs per-channel $L_2$ clipping and
+normalization so that each released channel lies in the unit ball
+before noise is added.
+
+\paragraph{Why this differs from per-iteration release.}
+Prior DP feature-distillation pipelines re-sample noise \emph{at every
+training iteration} of the student~\cite{lan2024gkd,anon_dpkd}. Under
+that implicit model, each training image's features are released
+$Q = TB/N$ times across $T$ student iterations of batch size $B$;
+adaptive composition over $Q$ releases inflates the user-level
+$\varepsilon$ by orders of magnitude (cf.~Table~\ref{tab:privacy}).
+The sample-once model in \eqref{eq:release} eliminates this
+composition entirely: each user contributes exactly one release, and
+by parallel composition over disjoint per-image data the user-level
+$\varepsilon$ equals the reported per-release $\varepsilon$ by
+construction.
+
+% ---------------------------------------------------------------------
+\subsection{Privacy accounting and composition}
+\label{ssec:accounting}
+
+We work in zero-Concentrated Differential
+Privacy~\cite{bun2016concentrated}. For a Gaussian mechanism on a
+$C$-dimensional vector with per-coordinate sensitivity $\Delta_c$ and
+per-coordinate noise scale $\sigma_c$, the per-release zCDP cost is
+\begin{equation}
+\rho_{\mathrm{rel}}
+ \;=\; \sum_{c=1}^{C}\frac{\Delta_c^2}{2\,\sigma_c^2}.
+\label{eq:rho-rel}
+\end{equation}
+After per-channel $L_2$ normalization each channel has norm at most
+$1$, so the replace-one $L_2$ sensitivity is the data-independent
+constant $\Delta_c = 2/K$, where $K\geq 1$ is the PATE-style teacher
+ensemble size (\S\ref{ssec:pate}). $(\varepsilon,\delta)$-DP follows by
+the Bun--Steinke conversion: a $\rho$-zCDP mechanism is
+$(\rho + 2\sqrt{\rho\log(1/\delta)},\,\delta)$-DP, and the inverse map
+\begin{equation}
+\rho(\varepsilon,\delta)
+ \;=\;\Bigl(\sqrt{\log(1/\delta)+\varepsilon}-\sqrt{\log(1/\delta)}\,\Bigr)^{2}
+\label{eq:eps-to-rho}
+\end{equation}
+calibrates $\rho$ to a target privacy budget.
+
+\paragraph{Composition.}
+The user-level cost differs by threat model only in the number of
+releases each user participates in:
+\begin{itemize}
+\item \textbf{Sample-once per image.} One release per user; user-level
+$\rho_{\mathrm{user}} = \rho_{\mathrm{rel}}$.
+\item \textbf{Per-iteration release.} Each user appears in
+$Q = TB/N$ releases of fresh noise on fresh teacher queries. Adaptive
+composition gives $\rho_{\mathrm{user}} = Q\,\rho_{\mathrm{rel}}$,
+mapped back to $(\varepsilon_{\mathrm{user}}, \delta)$ via the forward
+Bun--Steinke direction.
+\end{itemize}
+
+Table~\ref{tab:privacy} contrasts the user-level $\varepsilon$ each
+threat model delivers at the same per-release noise level on our DRIVE
+configuration ($T{=}40{,}000$, $B{=}4$, $N{=}20$, $\delta{=}10^{-5}$).
+The per-iteration model inflates user-level $\varepsilon$ by
+$400$--$1800\times$; sample-once preserves the reported value.
+
+\begin{table}[t]
+\centering
+\small
+\caption{User-level $\varepsilon$ under each threat model at matched
+per-release noise. The per-iteration model implicit to prior DP
+feature-distillation pipelines yields privacy guarantees hundreds to
+thousands of times weaker than reported; the sample-once model adopted
+here reports the actual per-user guarantee. Parameters:
+$T{=}40{,}000$, $B{=}4$, $N{=}20$, $\delta{=}10^{-5}$.}
+\label{tab:privacy}
+\begin{tabular}{c c r r}
+\toprule
+per-release $\varepsilon$ & threat model & releases/user & user-level $\varepsilon$ \\
+\midrule
+\multirow{2}{*}{$2$}  & per-iteration & $8000$ & $812.1$ \\
+                      & sample-once   & $1$    & $2.0$   \\
+\addlinespace[2pt]
+\multirow{2}{*}{$4$}  & per-iteration & $8000$ & $2712.4$ \\
+                      & sample-once   & $1$    & $4.0$    \\
+\addlinespace[2pt]
+\multirow{2}{*}{$8$}  & per-iteration & $8000$ & $9014.8$ \\
+                      & sample-once   & $1$    & $8.0$    \\
+\addlinespace[2pt]
+\multirow{2}{*}{$16$} & per-iteration & $8000$ & $28569.6$ \\
+                      & sample-once   & $1$    & $16.0$    \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---------------------------------------------------------------------
+\subsection{Importance-weighted water-filling and its $R^{1/4}$ ceiling}
+\label{ssec:wf}
+
+Equation~\eqref{eq:rho-rel} leaves open how a fixed per-release budget
+should be \emph{spent} across coordinates. We pick the allocation
+that minimizes a per-coordinate importance-weighted reconstruction
+error,
+\begin{equation}
+\min_{\sigma_1,\ldots,\sigma_C > 0}
+\sum_{c=1}^C s_c\,\sigma_c^{2}
+\quad\text{s.t.}\quad
+\sum_{c=1}^C\frac{\Delta_c^{2}}{2\,\sigma_c^{2}} \le \rho_{\mathrm{rel}},
+\label{eq:opt}
+\end{equation}
+with non-negative importance scores $s_c$. The solution is closed
+form.
+
+\begin{theorem}[Importance-weighted water-filling]
+\label{thm:wf}
+For $s_c \ge 0$, $\Delta_c > 0$ and budget $\rho_{\mathrm{rel}} > 0$
+the unique minimizer of~\eqref{eq:opt} is
+\begin{equation}
+\sigma_c^{\star} \;=\; \kappa \,\sqrt{\Delta_c}\, s_c^{-1/4},
+\qquad
+\kappa \;=\; \sqrt{\frac{1}{2\rho_{\mathrm{rel}}}
+                          \sum_{c=1}^{C}\Delta_c\,\sqrt{s_c}},
+\label{eq:wf}
+\end{equation}
+and the minimized objective scales as
+$\bigl(\sum_c \Delta_c\sqrt{s_c}\bigr)^2$, strictly less than the
+uniform-allocation objective whenever the $s_c$ are non-constant.
+\end{theorem}
+
+Proof in Appendix~\ref{app:proof}. The formula is an instance of the
+classical water-filling allocation, here \emph{instantiated} on a
+particular importance axis: index $c$ may enumerate channels, spatial
+positions, or any other partition of the released tensor.
+
+\paragraph{Channel instantiation (CANAL) and its ceiling.}
+The natural instantiation indexes channels, with $s_c$ the
+gradient-magnitude importance of bottleneck channel $c$. This is what
+prior work~\cite{anon_dpkd} effectively proposes when porting GKD to
+DP. \emph{Theorem~\ref{thm:wf} predicts the gain quantitatively}: when
+the importance ratio $R = \max_c s_c / \min_c s_c$ is small, the
+spread of optimal $\sigma$ across channels is proportional to
+$R^{1/4}$, and the corresponding gain over uniform allocation collapses
+below decoder noise sensitivity. The measured importance ratio on
+DRIVE bottleneck is $R_{\mathrm{channel}}\!\approx\!1.96$, predicting
+a $\sigma$-spread of only $1.13\times$.
+
+Table~\ref{tab:canal-ceiling} reports the measured CANAL lift over
+uniform across a synthetic importance-ratio sweep at fixed natural
+$\Delta_c$, demonstrating that even when we artificially inflate $R$
+to $1000\times$ the per-channel lift remains within seed noise of
+zero. The closed form is a useful theoretical scaffold; on this
+dataset it does not yield an empirical channel-axis gain.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Channel-WF (CANAL) Dice lift over uniform on DRIVE student
+distillation, sweeping a synthetic importance ratio $R$. Mean over
+$5$ seeds. Even at $R=1000\times$ the lift is within seed noise of
+zero, consistent with the predicted $R^{1/4}$ ceiling.}
+\label{tab:canal-ceiling}
+\begin{tabular}{c c c c c}
+\toprule
+$R$ & predicted $\sigma$ spread & $\Delta$ Dice @ $\varepsilon=4$ & $\Delta$ Dice @ $\varepsilon=8$ & $\Delta$ Dice @ $\varepsilon=16$ \\
+\midrule
+1     & $1.00\times$ & $-0.0008$ & $-0.0012$ & $+0.0003$ \\
+10    & $1.78\times$ & $+0.0012$ & $-0.0009$ & $-0.0004$ \\
+100   & $3.16\times$ & $+0.0010$ & $-0.0016$ & $-0.0018$ \\
+1000  & $5.62\times$ & $-0.0002$ & $-0.0018$ & $-0.0020$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---------------------------------------------------------------------
+\subsection{PATE multi-teacher feature aggregation}
+\label{ssec:pate}
+
+Where the allocation axis fails to lift, the \emph{sensitivity} axis
+does. We adopt an honest PATE-style construction: partition the
+private training set into $K$ disjoint patient cohorts; train $K$
+teachers $\phi_T^{(1)},\ldots,\phi_T^{(K)}$ separately; on each
+held-out query image, release the noisy aggregate
+\begin{equation}
+\widetilde{z}_i
+ \;=\; \mathrm{denorm}\!\Bigl(
+      \tfrac{1}{K}\textstyle\sum_{k=1}^{K}\mathrm{norm}\!\bigl(\phi_T^{(k)}(x_i)\bigr)
+      + \eta_i\Bigr),
+\qquad \eta_i\sim\mathcal{N}(0,\sigma^2 I).
+\label{eq:pate-release}
+\end{equation}
+
+\paragraph{Sensitivity reduction.}
+Replacing one patient $x_{i_0}$ affects \emph{exactly one} teacher
+(the cohort the patient was assigned to). After per-channel $L_2$
+normalization each teacher contributes a unit-norm vector to the
+mean, so the replace-one sensitivity of the aggregate is
+$\Delta = 2/K$ per coordinate. At fixed $\rho_{\mathrm{rel}}$,
+$\sigma$ then scales as $1/\sqrt{K}$. This is a genuine
+sensitivity-reduction mechanism, not merely an averaging of variances.
+
+\paragraph{Empirical $K$-saturation.}
+Table~\ref{tab:mechanism-comp} reports our headline empirical result.
+At $K{=}10$ and $\varepsilon{=}16$ the student reaches $0.648$ Dice,
+or $96\%$ of the non-private clean-teacher reference ($0.676$). The
+K-saturation curve is monotone in $K$ across all three $\varepsilon$
+values we tested; concrete sensitivity values appear in
+Appendix~\ref{app:k-sat}.
+
+\begin{table*}[t]
+\centering
+\small
+\caption{Mechanism comparison on DRIVE vessel segmentation. Per-cell:
+mean Dice across $5$ student seeds. Non-private clean-teacher
+reference: $0.676$. ``CANAL'' adds the channel water-filling
+allocation of \S\ref{ssec:wf} on top of the indicated K.
+Sample-once + public-proxy threat model throughout, so per-release
+$\varepsilon$ equals user-level $\varepsilon$.}
+\label{tab:mechanism-comp}
+\begin{tabular}{l ccc}
+\toprule
+Method & $\varepsilon = 2$ & $\varepsilon = 8$ & $\varepsilon = 16$ \\
+\midrule
+$K{=}1$ uniform (baseline)        & 0.581 & 0.594 & 0.596 \\
+$K{=}1$ + CANAL                   & 0.584 & 0.593 & 0.599 \\
+PATE $K{=}5$ + uniform            & 0.593 & 0.618 & 0.627 \\
+PATE $K{=}5$ + CANAL              & 0.592 & 0.619 & 0.625 \\
+\textbf{PATE $K{=}10$ + uniform}  & \textbf{0.607} & \textbf{0.628} & \textbf{0.648} \\
+\midrule
+Non-private clean teacher         & \multicolumn{3}{c}{0.676} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\paragraph{What this confirms about \S\ref{ssec:wf}.}
+Each row of Table~\ref{tab:mechanism-comp} pairing uniform vs.\ CANAL
+inside the same $K$ shows essentially the same Dice within seed
+noise. CANAL's marginal contribution is empirically zero across all
+$K$ on this dataset, in line with the $R^{1/4}$ ceiling. PATE
+benefits, by contrast, are visible and grow with both $K$ and
+$\varepsilon$.
+
+% ---------------------------------------------------------------------
+\subsection{Normalized $\alpha$ loss for explicit teacher-vs-label mix}
+\label{ssec:alpha}
+
+The student's training objective combines a feature-matching loss
+against the noisy teacher target $\widetilde{z}_i$ with a task loss
+against the ground-truth mask $y_i$:
+\begin{equation}
+\mathcal{L}_{\mathrm{total}}
+ \;=\; (1-\alpha)\,\mathcal{L}_{\mathrm{task}}(y_i)
+   \;+\; \alpha\,c\cdot\mathcal{L}_{\mathrm{feat}}(\widetilde{z}_i),
+\quad
+c \;=\; \frac{\mathcal{L}_{\mathrm{task}}.\mathrm{detach}()}
+              {\mathcal{L}_{\mathrm{feat}}.\mathrm{detach}() + \epsilon}.
+\label{eq:alpha-loss}
+\end{equation}
+The detached scale factor $c$ rescales the feature-matching loss so
+that the two terms enter the gradient at matched magnitude. Then
+$\alpha$ is a \emph{true} percentage: $\alpha = 0.7$ means $70\%$ of
+the student's gradient signal comes from the noisy teacher and $30\%$
+from the ground-truth mask, regardless of the raw scales of the two
+losses.
+
+This matters for two reasons. (i) The ground-truth mask is itself a
+function of the private images (curated by expert annotators), so the
+task term introduces a label-side data dependence not captured by the
+feature-release accounting. Equation~\eqref{eq:alpha-loss} exposes
+that dependence as a single explicit dial: $\alpha\!\to\!1$ approaches
+pure feature distillation, removing label-side dependence at the cost
+of supervision signal. (ii) The $\alpha$ sweep characterizes the
+privacy-utility-task triangle empirically. We report the curve in
+Section~\ref{sec:experiments}.
+
+% ---------------------------------------------------------------------
+\subsection{Implementation}
+\label{ssec:impl}
+
+The sample-once threat model is realized by a single precomputation
+pass before student training: every training image is fed once
+through each of $K$ teacher encoders, the bottleneck representations
+are clipped and per-channel normalized, the noise vector $\eta_i$
+sampled from~\eqref{eq:pate-release} is added, and the result is
+written to disk keyed by image identifier. Student training then
+loads these fixed targets at every iteration, so the inner loop
+contains neither fresh teacher queries nor fresh noise samples. The
+clipping caps and importance scores entering~\eqref{eq:wf} are
+estimated on a public auxiliary retinal dataset disjoint from the
+private training set (we use HRF~\cite{budai2013hrf}); they therefore
+incur zero privacy cost on the private data. Pseudocode is
+Algorithm~\ref{alg:precompute} in Appendix~\ref{app:pseudocode}.
+
+% =====================================================================
+%  APPENDICES — kept in the same file; placed after \appendix.
+% =====================================================================
+\appendix
+
+% ---------------------------------------------------------------------
+\section{Pseudocode: sample-once PATE precompute}
+\label{app:pseudocode}
+
+Algorithm~\ref{alg:precompute} gives the precomputation routine that
+realizes the sample-once threat model with $K$-teacher PATE
+aggregation. $\phi_T^{(k)}$ denotes the $k$-th frozen teacher
+encoder, $\mathrm{clip}(\cdot;\widehat{c})$ per-channel $L_2$ clipping
+to caps $\widehat{c}$, and $\eta\sim\mathcal{N}(0,\sigma^2)$ draws
+independent Gaussian noise per coordinate.
+
+\begin{algorithm}[t]
+\caption{Sample-once PATE precompute of noisy bottlenecks.}
+\label{alg:precompute}
+\begin{algorithmic}[1]
+\Require teachers $\{\phi_T^{(k)}\}_{k=1}^{K}$ trained on disjoint
+         cohorts; training images $\{x_i\}_{i=1}^{N}$;
+         per-channel caps $\widehat{c}\in\mathbb{R}^{C}$;
+         per-channel noise scales $\sigma\in\mathbb{R}^{C}$
+\Ensure  noisy bottleneck cache
+         $\mathcal{C}:\mathrm{img\_id}\!\to\!\mathbb{R}^{C\times H\times W}$
+\State $\mathcal{C} \gets \emptyset$
+\For{$i = 1,\dots,N$}
+  \State $\bar{z}_i \gets \tfrac{1}{K}\sum_{k=1}^{K} \mathrm{clip}\bigl(\phi_T^{(k)}(x_i);\widehat{c}\bigr) \,\oslash\,\widehat{c}$
+         \Comment{aggregate unit-norm release per coordinate}
+  \State sample $\eta_i \in \mathbb{R}^{C\times H\times W}$ with
+         $\eta_i^{(c)} \!\sim\! \mathcal{N}(0,\sigma_c^{2})$
+  \State $\widetilde{z}_i \gets (\bar{z}_i + \eta_i)\odot\widehat{c}$
+         \Comment{denormalize; pure post-processing}
+  \State $\mathcal{C}[\mathrm{img\_id}(x_i)] \gets \widetilde{z}_i$
+\EndFor
+\State \Return $\mathcal{C}$
+\end{algorithmic}
+\end{algorithm}
+
+\noindent At training time the student's inner loop replaces the
+teacher path by the single lookup $\widetilde{z}_i \leftarrow
+\mathcal{C}[\mathrm{img\_id}(x_i)]$.
+
+% ---------------------------------------------------------------------
+\section{Full proof of Theorem~\ref{thm:wf}}
+\label{app:proof}
+
+We restate the optimization for convenience:
+\begin{equation*}
+\min_{\sigma_1,\ldots,\sigma_C>0}\; \sum_{c=1}^{C} s_c\,\sigma_c^{2}
+\quad\text{s.t.}\quad
+\sum_{c=1}^{C} \frac{\Delta_c^{2}}{2\,\sigma_c^{2}} \le \rho_{\mathrm{rel}}.
+\end{equation*}
+
+\paragraph{Change of variables.}
+Let $u_c = 1/\sigma_c^{2}$, so $u_c > 0$ and $\sigma_c^{2} = 1/u_c$.
+The problem becomes
+\begin{equation}
+\min_{u_1,\ldots,u_C>0}\; \sum_{c=1}^{C} \frac{s_c}{u_c}
+\quad\text{s.t.}\quad
+\sum_{c=1}^{C} \frac{\Delta_c^{2}}{2}\,u_c \le \rho_{\mathrm{rel}}.
+\label{eq:dual}
+\end{equation}
+Both the objective and the linear constraint are convex on the
+positive orthant, giving a convex program with a unique minimizer.
+The constraint is active at the optimum because the objective is
+strictly decreasing in each $u_c$.
+
+\paragraph{Lagrangian.}
+With multiplier $\lambda > 0$:
+\begin{equation*}
+\mathcal{L}(u,\lambda)
+ \;=\; \sum_{c=1}^{C} \frac{s_c}{u_c}
+       + \lambda\left(\sum_{c=1}^{C}\frac{\Delta_c^{2}}{2}u_c - \rho_{\mathrm{rel}}\right).
+\end{equation*}
+Stationarity $\partial\mathcal{L}/\partial u_c = 0$ gives
+\begin{equation*}
+-\frac{s_c}{u_c^{2}} + \frac{\lambda\,\Delta_c^{2}}{2} = 0
+\;\;\Longrightarrow\;\;
+u_c^{\star} \;=\; \sqrt{\frac{2\,s_c}{\lambda\,\Delta_c^{2}}}
+\;=\; \sqrt{\frac{2}{\lambda}}\;\frac{\sqrt{s_c}}{\Delta_c}.
+\end{equation*}
+
+\paragraph{Solving for $\lambda$.}
+Substitute into the active constraint
+$\sum_c \tfrac{\Delta_c^{2}}{2}u_c^{\star} = \rho_{\mathrm{rel}}$:
+\begin{equation*}
+\sqrt{\frac{1}{2\lambda}}\,\sum_{c=1}^{C}\Delta_c\sqrt{s_c}
+ \;=\; \rho_{\mathrm{rel}}
+\;\;\Longrightarrow\;\;
+\lambda \;=\; \frac{1}{2\,\rho_{\mathrm{rel}}^{2}}
+              \Bigl(\sum_{c=1}^{C}\Delta_c\sqrt{s_c}\Bigr)^{2}.
+\end{equation*}
+
+\paragraph{Optimal $\sigma_c^{\star}$.}
+Substituting $\lambda$ back and using
+$\sigma_c^{\star} = 1/\sqrt{u_c^{\star}}$ recovers
+\begin{equation*}
+\sigma_c^{\star}
+ \;=\;
+ \underbrace{\sqrt{\frac{1}{2\,\rho_{\mathrm{rel}}}\sum_{c=1}^{C}\Delta_c\sqrt{s_c}}}_{\displaystyle\kappa}
+ \;\frac{\sqrt{\Delta_c}}{s_c^{1/4}},
+\end{equation*}
+which is~\eqref{eq:wf}.
+
+\paragraph{Strict improvement over uniform.}
+The optimum value of the original objective is
+\begin{equation}
+J_{\mathrm{WF}}^{\star}
+ \;=\; \frac{1}{2\,\rho_{\mathrm{rel}}}
+       \Bigl(\sum_{c=1}^{C}\Delta_c\sqrt{s_c}\Bigr)^{2}.
+\label{eq:wf-obj}
+\end{equation}
+For uniform $\sigma_{\mathrm{unif}}$ saturating the same budget,
+$\sigma_{\mathrm{unif}}^{2} = (\sum_c \Delta_c^{2})/(2\,\rho_{\mathrm{rel}})$,
+giving
+\begin{equation}
+J_{\mathrm{unif}}
+ \;=\; \frac{1}{2\,\rho_{\mathrm{rel}}}
+       \Bigl(\sum_{c}\Delta_c^{2}\Bigr)\Bigl(\sum_{c}s_c\Bigr).
+\label{eq:unif-obj}
+\end{equation}
+Cauchy--Schwarz applied to vectors $(\Delta_c)$ and
+$(\Delta_c\sqrt{s_c})$, or equivalently
+$\bigl(\sum_c \Delta_c\sqrt{s_c}\bigr)^{2}
+ \le (\sum_c \Delta_c^{2})(\sum_c s_c)$, gives
+$J_{\mathrm{WF}}^{\star} \le J_{\mathrm{unif}}$, with strict inequality
+whenever the $\{s_c\}$ are not all equal. \qed
+
+\paragraph{Quantitative spread.}
+At constant $\Delta_c=\Delta$, the ratio between the largest and
+smallest optimal $\sigma$ is
+\begin{equation*}
+\frac{\sigma^{\star}_{\max}}{\sigma^{\star}_{\min}}
+ \;=\; \Bigl(\frac{s_{\max}}{s_{\min}}\Bigr)^{1/4}
+ \;=\; R^{1/4},
+\end{equation*}
+which is the $R^{1/4}$ ceiling referenced in \S\ref{ssec:wf}. On
+DRIVE, $R_{\mathrm{channel}} \approx 1.96$ gives a spread of
+$1.18\times$, falling below the noise sensitivity of downstream Dice
+on this teacher--student pair.
+
+% ---------------------------------------------------------------------
+\section{Empirical $K$-saturation curve}
+\label{app:k-sat}
+
+For completeness, Table~\ref{tab:ksat} reports the full $K$-saturation
+sweep used to choose $K{=}10$ as the strongest reportable setting in
+Table~\ref{tab:mechanism-comp}. $\sigma$ at $\varepsilon{=}16$ scales
+empirically as $1/\sqrt{K}$ as predicted; Dice plateaus as $K$ grows.
+
+\begin{table}[t]
+\centering
+\small
+\caption{PATE $K$-saturation, sample-once + public proxy threat model,
+$5$ student seeds per cell.}
+\label{tab:ksat}
+\begin{tabular}{c c c c c}
+\toprule
+$K$ & $\sigma$ at $\varepsilon{=}16$ & Dice $\varepsilon{=}2$ & Dice $\varepsilon{=}8$ & Dice $\varepsilon{=}16$ \\
+\midrule
+1   & 8.64 & 0.581 & 0.594 & 0.596 \\
+3   & 2.88 & 0.588 & 0.609 & 0.615 \\
+5   & 1.73 & 0.593 & 0.618 & 0.627 \\
+8   & 1.08 & 0.601 & 0.625 & 0.638 \\
+10  & 0.86 & \textbf{0.607} & \textbf{0.628} & \textbf{0.648} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---------------------------------------------------------------------
+%  BibTeX entries to add to references.bib (paste into your .bib):
+%
+%  @inproceedings{bun2016concentrated,
+%    title={Concentrated Differential Privacy: Simplifications,
+%           Extensions, and Lower Bounds},
+%    author={Bun, Mark and Steinke, Thomas},
+%    booktitle={Theory of Cryptography Conference (TCC)},
+%    year={2016},
+%  }
+%  @inproceedings{lan2024gkd,
+%    title={Gradient-Guided Knowledge Distillation for Object Detection},
+%    author={Lan, Qizhen and Tian, Qing},
+%    booktitle={WACV},
+%    year={2024},
+%  }
+%  @article{budai2013hrf,
+%    title={Robust vessel segmentation in fundus images},
+%    author={Budai, Attila and Bock, R\"udiger and Maier, Andreas and Hornegger, Joachim and Michelson, Georg},
+%    journal={International Journal of Biomedical Imaging},
+%    year={2013},
+%  }
+%  @misc{anon_dpkd,
+%    title={[Anonymous DP feature distillation reference]},
+%    note={Placeholder for prior work using per-iteration release},
+%    year={2024},
+%  }
+% ---------------------------------------------------------------------

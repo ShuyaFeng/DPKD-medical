@@ -297,10 +297,12 @@ This is incorrect: ``... subsequently developed by Alpher \etal~\cite{Alpher03} 
 
 %------------------------------------------------------------------------
 % =====================================================================
-% Privacy / Method section (real WACV content).
-% Source: paper_draft/section_3_body.tex
+% Method section (single file, contains §3.1-3.6 + appendix at end).
+% Source: paper_draft/section_3.tex
+% Note: the file's \appendix command flips numbering for everything
+% it puts AFTER §3, so the appendices appear at the end of the paper.
 % =====================================================================
-\input{paper_draft/section_3_body}
+\input{paper_draft/section_3}
 
 %------------------------------------------------------------------------
 % --------------------------------------------------------------------
@@ -473,12 +475,8 @@ Please direct any questions to the production editor in charge of these proceedi
 \url{https://www.computer.org/about/contact}.
 
 
-% =====================================================================
-% Appendices (\appendix command + Algorithm 1 pseudocode + full proof
-% of Theorem 1). Source: paper_draft/section_3_appendix.tex
-% MUST appear after all \section commands and before \bibliography.
-% =====================================================================
-\input{paper_draft/section_3_appendix}
+% Appendices live inside paper_draft/section_3.tex (after \appendix),
+% so no separate \input is needed here.
 
 %%%%%%%%% REFERENCES
 {\small
