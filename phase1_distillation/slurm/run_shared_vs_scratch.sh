@@ -16,4 +16,4 @@ export PYTHONNOUSERSITE=1
 
 export REPO=/home/fengs/DPKD-medical/phase1_distillation
 cd "$REPO"
-python3 drive_shared_vs_scratch.py
+python3 drive_shared_vs_scratch_init.py
