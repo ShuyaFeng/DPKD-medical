@@ -26,7 +26,13 @@ fi
 
 echo "Installing packages (torch + imaging stack)..."
 pip install --upgrade pip
-pip install torch numpy pillow scikit-image scipy matplotlib huggingface_hub datasets
+pip install torch numpy pillow scikit-image scipy matplotlib huggingface_hub
+
+# NOTE: 'datasets' is intentionally NOT installed here. It pulls pyarrow ->
+# libcst which needs a Rust toolchain and fails to build on this server.
+# download_drive.py only needs it for the parquet fallback (rarely hit).
+# If a repo turns out to be parquet-packed, install via conda (prebuilt,
+# no Rust):   conda install -c conda-forge pyarrow datasets
 
 echo ""
 echo "=== verify ==="
