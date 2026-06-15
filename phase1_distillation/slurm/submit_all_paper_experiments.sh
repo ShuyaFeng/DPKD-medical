@@ -11,6 +11,15 @@
 set -e
 cd "$(dirname "$0")"
 
+# SLURM --output dirs must exist before jobs launch
+mkdir -p /home/fengs/DPKD-medical/slurm_out
+
+# conda env that has torch + numpy + PIL + skimage.
+# Override if yours is named differently:  CONDA_ENV=myenv bash submit_all_paper_experiments.sh
+export CONDA_ENV="${CONDA_ENV:-pytorch}"
+echo "Using conda env: $CONDA_ENV  (override with CONDA_ENV=...)"
+echo ""
+
 echo "=== P1: core contributions (channel-pruning + per-teacher) ==="
 J1=$(sbatch --parsable run_pate_pruning_joint.sh)
 echo "  pate_pruning_joint   -> $J1   (K×keep heatmap)"
