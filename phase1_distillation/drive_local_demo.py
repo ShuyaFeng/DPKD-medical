@@ -148,6 +148,11 @@ def compute_importance(model, loader, device):
     n = 0
     for x, y in loader:
         x, y = x.to(device), y.to(device)
+        # Enable a grad path through the input so e3 stays in the autograd
+        # graph even when the teacher's params are frozen (requires_grad=False),
+        # e.g. teachers returned by train_K_teachers. Without this,
+        # e3.retain_grad() raises "can't retain_grad on requires_grad=False".
+        x.requires_grad_(True)
         model.zero_grad(set_to_none=True)
         e1, e2, e3 = model.encode(x)
         e3.retain_grad()
