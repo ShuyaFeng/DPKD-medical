@@ -50,7 +50,7 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, str(Path(__file__).parent))
 from drive_local_demo import (
     DriveDataset, TinyUNet, train_teacher, compute_importance,
-    collect_caps, evaluate_vessel_dice,
+    collect_caps, evaluate_vessel_dice, evaluate_metrics, summarize_metrics,
 )
 from synthetic_demo import (
     eps_to_rho, uniform_sigma, clip_and_normalise, denormalise,
@@ -89,20 +89,15 @@ def precompute(teacher, train_ds, caps, sigma, active_mask, device, seed):
 
 
 def run_students(train_ds, val_loader, cache, device, seeds, base_T):
-    dices = []
+    """Return a list of per-seed best-metric dicts."""
+    mlist = []
     for s in seeds:
-        t0 = time.time()
-        d, _ = train_student_distill(
+        _, bm = train_student_distill(
             train_ds, val_loader, cache, device,
             student_base=16, teacher_base=base_T,
             n_epochs=40, lr=1e-3, lambda_feat=0.4, seed=s)
-        dices.append(d)
-    return dices
-
-
-def summ(dices):
-    return {"dices": dices, "mean": float(np.mean(dices)),
-            "std": float(np.std(dices)), "sem": float(np.std(dices)/np.sqrt(len(dices)))}
+        mlist.append(bm)
+    return mlist
 
 
 def main():
@@ -156,15 +151,15 @@ def main():
         stu = TinyUNet(in_ch=3, num_classes=2, base=16).to(device)
         train_teacher(stu, DataLoader(train_ds, batch_size=4, shuffle=True),
                       n_epochs=40, lr=1e-3, device=device)
-        so.append(evaluate_vessel_dice(stu, val_loader, device))
-    results["no_noise"]["student_only"] = summ(so)
-    print(f"    student_only = {np.mean(so):.4f}")
+        so.append(evaluate_metrics(stu, val_loader, device))
+    results["no_noise"]["student_only"] = summarize_metrics(so)
+    print(f"    student_only vessel_dice = {summarize_metrics(so)['vessel_dice']['mean']:.4f}")
 
     for tag, mask in [("clean_full", None), ("clean_imp10", imp_mask(0.10))]:
         cache = precompute(teacher, train_ds, caps, None, mask, device, seed=7)
-        d = run_students(train_ds, val_loader, cache, device, seeds, base_T)
-        results["no_noise"][tag] = summ(d)
-        print(f"    {tag} = {np.mean(d):.4f}")
+        ml = run_students(train_ds, val_loader, cache, device, seeds, base_T)
+        results["no_noise"][tag] = summarize_metrics(ml)
+        print(f"    {tag} vessel_dice = {summarize_metrics(ml)['vessel_dice']['mean']:.4f}")
 
     # --- noisy conditions ---
     print("\n[3/3] Noisy conditions...")
@@ -184,9 +179,11 @@ def main():
                     else uniform_sigma(deltas, rho)
             cache = precompute(teacher, train_ds, caps, sigma, mask, device,
                                seed=42 + int(eps*10) + hash(tag) % 100)
-            d = run_students(train_ds, val_loader, cache, device, seeds, base_T)
-            results["noisy"][str(eps)][tag] = summ(d)
-            print(f"    {tag:12s} = {np.mean(d):.4f} ± {np.std(d):.4f}")
+            ml = run_students(train_ds, val_loader, cache, device, seeds, base_T)
+            sm = summarize_metrics(ml)
+            results["noisy"][str(eps)][tag] = sm
+            print(f"    {tag:12s} vd={sm['vessel_dice']['mean']:.4f} "
+                  f"mdice={sm['mdice']['mean']:.4f} miou={sm['miou']['mean']:.4f}")
 
     out = Path(__file__).parent / "drive_pruning_ablation_results.json"
     with out.open("w") as f:

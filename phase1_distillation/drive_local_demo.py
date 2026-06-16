@@ -113,6 +113,49 @@ def evaluate_vessel_dice(model, loader, device):
     return float(np.mean(scores))
 
 
+@torch.no_grad()
+def evaluate_metrics(model, loader, device, num_classes: int = 2,
+                     eps: float = 1e-7) -> dict:
+    """Full metric suite for the paper: vessel Dice (class 1), mean Dice
+    across classes, mean IoU across classes, and pixel accuracy."""
+    model.eval()
+    dice_c = {c: [] for c in range(num_classes)}
+    iou_c = {c: [] for c in range(num_classes)}
+    correct = 0
+    total = 0
+    for x, y in loader:
+        x, y = x.to(device), y.to(device)
+        pred = model(x).argmax(dim=1)
+        correct += (pred == y).sum().item()
+        total += y.numel()
+        for c in range(num_classes):
+            pc = (pred == c)
+            gc = (y == c)
+            inter = (pc & gc).sum(dim=(1, 2)).float()
+            denom = pc.sum(dim=(1, 2)).float() + gc.sum(dim=(1, 2)).float()
+            union = (pc | gc).sum(dim=(1, 2)).float()
+            dice_c[c].append(((2 * inter + eps) / (denom + eps)).mean().item())
+            iou_c[c].append(((inter + eps) / (union + eps)).mean().item())
+    return {
+        "vessel_dice": float(np.mean(dice_c[1])),
+        "mdice": float(np.mean([np.mean(dice_c[c]) for c in range(num_classes)])),
+        "miou": float(np.mean([np.mean(iou_c[c]) for c in range(num_classes)])),
+        "pixel_acc": correct / max(total, 1),
+    }
+
+
+def summarize_metrics(metrics_list: list) -> dict:
+    """Aggregate a list of per-seed metric dicts into mean/std/vals per key."""
+    keys = metrics_list[0].keys()
+    out = {}
+    for k in keys:
+        vals = [m[k] for m in metrics_list]
+        out[k] = {"mean": float(np.mean(vals)),
+                  "std": float(np.std(vals)),
+                  "vals": vals}
+    return out
+
+
 # -------------------------------------------------------------------------
 # Train teacher
 # -------------------------------------------------------------------------

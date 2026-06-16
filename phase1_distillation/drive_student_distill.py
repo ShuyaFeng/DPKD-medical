@@ -39,7 +39,7 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, str(Path(__file__).parent))
 from drive_local_demo import (
     DriveDataset, TinyUNet, train_teacher, evaluate_vessel_dice,
-    compute_importance, collect_caps, vessel_dice,
+    evaluate_metrics, compute_importance, collect_caps, vessel_dice,
 )
 from synthetic_demo import (
     eps_to_rho, waterfilling_sigma, uniform_sigma,
@@ -95,6 +95,7 @@ def train_student_distill(train_ds, val_loader, cache, device,
     N = len(train_ds)
     batch_size = 4
     best_dice = 0.0
+    best_metrics = {"vessel_dice": 0.0, "mdice": 0.0, "miou": 0.0, "pixel_acc": 0.0}
     best_ep = 0
     history = []
 
@@ -121,9 +122,11 @@ def train_student_distill(train_ds, val_loader, cache, device,
             tot_task += t_loss.item(); tot_feat += f_loss.item()
             n_batches += 1
 
-        val_dice = evaluate_vessel_dice(student, val_loader, device)
+        metrics = evaluate_metrics(student, val_loader, device)
+        val_dice = metrics["vessel_dice"]
         if val_dice > best_dice:
             best_dice = val_dice
+            best_metrics = metrics
             best_ep = ep + 1
         history.append({"ep": ep + 1, "task": tot_task / n_batches,
                         "feat": tot_feat / n_batches, "val_dice": val_dice})
@@ -133,7 +136,10 @@ def train_student_distill(train_ds, val_loader, cache, device,
                   f"feat={tot_feat/n_batches:.4f}  val={val_dice:.4f}  "
                   f"best_so_far={best_dice:.4f} (ep {best_ep})")
 
-    return best_dice, history
+    # Returns (best_vessel_dice, best_metrics_dict). Existing callers that do
+    # `best, _ = train_student_distill(...)` keep working — the second value
+    # is now the metrics dict instead of history (both were ignored anyway).
+    return best_dice, best_metrics
 
 
 def main():
