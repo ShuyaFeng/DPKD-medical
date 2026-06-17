@@ -71,7 +71,7 @@ def main():
 
     deltas = torch.full((C,), 2.0)
     sig = lambda e: float(correct_uniform_sigma(deltas, eps_to_rho(e))[0])
-    epsilons = [128.0, 32.0, 16.0, 8.0, 2.0]
+    epsilons = [32.0, 16.0, 8.0, 2.0]
     configs = [("no-noise", None, 0.0)] + [(f"ε={e:g}", e, sig(e)) for e in epsilons]
 
     torch.manual_seed(0)
@@ -96,7 +96,7 @@ def main():
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     show = [0, 5, 10]
-    panel = ["original", "no-noise", "ε=128", "ε=16", "ε=2"]
+    panel = ["original", "no-noise", "ε=16", "ε=8", "ε=2"]
     fig, axes = plt.subplots(len(show), len(panel), figsize=(2.1 * len(panel), 2.1 * len(show)))
     for r, idx in enumerate(show):
         for c, key in enumerate(panel):
