@@ -32,6 +32,13 @@ Replaced by `drive_pate_K_saturation` (K sweep, 5 seeds) and the joint sweep.
   by `drive_pate_K_saturation_results.json`. (`drive_pate_poc.py` stays: it is a
   shared library imported by the current experiment scripts.)
 
+## Superseded intermediate figures (this session)
+Earlier comparison plots replaced by `fig_comprehensive.py` / `fig_ablation_ladder.py`.
+- `fig_methods_vs_baselines.{py,png}` — ours-vs-baseline bar chart, before the
+  ablation-ladder framing.
+- `fig_ablation_plot.py` + `fig_ablation.png` — imp-vs-random bar view, now
+  covered by `fig_joint_heatmap` + `fig_comprehensive`.
+
 ## NOT archived (still wired into current pipeline)
 - `drive_pate_5seed.*` — its result JSON is read by
   `drive_compare_pate_canal_uniform.py`, so it is an upstream dependency.
