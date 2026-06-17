@@ -118,7 +118,9 @@ def main():
     ax.plot(es, [results[f"ε={e:g}"]["psnr"] for e in es], "o-", color="#d62728", lw=2, ms=8, label="PSNR (dB)")
     ax.axhline(results["no-noise"]["psnr"], color="black", ls="--", lw=1.3,
                label=f"no-noise PSNR={results['no-noise']['psnr']:.1f}")
-    ax.set_xscale("log", base=2); ax.set_xlabel("privacy budget ε"); ax.set_ylabel("reconstruction PSNR (dB)")
+    ax.set_xscale("log", base=2)
+    ax.set_xticks(es); ax.set_xticklabels([f"{int(e)}" for e in es]); ax.minorticks_off()
+    ax.set_xlabel("privacy budget ε"); ax.set_ylabel("reconstruction PSNR (dB)")
     ax.set_title("Reconstruction fidelity vs ε"); ax.legend(); ax.grid(alpha=0.3)
     fig2.tight_layout(); fig2.savefig(HERE / "fig_reconstruction_psnr.png", dpi=140)
     print("saved fig_reconstruction.png, fig_reconstruction_psnr.png + results json")

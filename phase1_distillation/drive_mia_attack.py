@@ -112,7 +112,11 @@ def main():
              color="#d62728", lw=2, ms=9, label="MIA AUC (with noise)")
     ax1.scatter([max(epsilons) * 2], [results["no-noise"]["auc"]], color="black",
                 s=120, marker="*", zorder=5, label=f"NO NOISE = {results['no-noise']['auc']:.2f}")
-    ax1.set_xscale("log"); ax1.set_xlabel("privacy budget ε"); ax1.set_ylabel("membership-inference AUC")
+    ax1.set_xscale("log", base=2)
+    tk = sorted(epsilons) + [max(epsilons) * 2]
+    ax1.set_xticks(tk); ax1.set_xticklabels([f"{e:g}" for e in sorted(epsilons)] + ["∞\n(no noise)"])
+    ax1.minorticks_off()
+    ax1.set_xlabel("privacy budget ε"); ax1.set_ylabel("membership-inference AUC")
     ax1.set_ylim(0.45, 1.02); ax1.set_title("(a) MIA AUC vs ε — noise kills membership signal")
     ax1.legend(fontsize=9); ax1.grid(alpha=0.3)
 
