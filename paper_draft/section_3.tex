@@ -237,7 +237,8 @@ Replacing one patient $x_{i_0}$ affects \emph{exactly one} teacher
 normalization each teacher contributes a unit-norm vector to the
 mean, so the replace-one sensitivity of the aggregate is
 $\Delta = 2/K$ per coordinate. At fixed $\rho_{\mathrm{rel}}$,
-$\sigma$ then scales as $1/\sqrt{K}$. This is a genuine
+$\sigma$ then scales as $1/K$ (since $\sigma$ saturating
+$\rho_{\mathrm{rel}}$ is proportional to $\Delta$). This is a genuine
 sensitivity-reduction mechanism, not merely an averaging of variances.
 
 \paragraph{Empirical $K$-saturation.}
@@ -255,7 +256,7 @@ Appendix~\ref{app:k-sat}.
 mean Dice across $5$ student seeds. Non-private clean-teacher
 reference: $0.676$. ``CANAL'' adds the channel water-filling
 allocation of \S\ref{ssec:wf} on top of the indicated K.
-Sample-once + public-proxy threat model throughout, so per-release
+Sample-once threat model throughout, so per-release
 $\varepsilon$ equals user-level $\varepsilon$.}
 \label{tab:mechanism-comp}
 \begin{tabular}{l ccc}
@@ -325,12 +326,22 @@ are clipped and per-channel normalized, the noise vector $\eta_i$
 sampled from~\eqref{eq:pate-release} is added, and the result is
 written to disk keyed by image identifier. Student training then
 loads these fixed targets at every iteration, so the inner loop
-contains neither fresh teacher queries nor fresh noise samples. The
-clipping caps and importance scores entering~\eqref{eq:wf} are
-estimated on a public auxiliary retinal dataset disjoint from the
-private training set (we use HRF~\cite{budai2013hrf}); they therefore
-incur zero privacy cost on the private data. Pseudocode is
-Algorithm~\ref{alg:precompute} in Appendix~\ref{app:pseudocode}.
+contains neither fresh teacher queries nor fresh noise samples. In the
+experiments reported here the clipping caps---and the importance scores
+entering~\eqref{eq:wf} when water-filling is used---are estimated
+directly on the private training data: each teacher's caps are computed
+on its own (private) cohort and used to normalize and de-normalize that
+teacher's released features. These statistics are therefore
+data-dependent, so the released features carry a residual dependence on
+them that the per-release $(\varepsilon,\delta)$ accounting of
+\S\ref{ssec:accounting} does not separately charge; we flag this as a
+limitation of the reported runs rather than a property of the mechanism.
+A disjoint public calibration set (e.g.\ HRF~\cite{budai2013hrf}) would
+remove this data dependence, but we do not rely on one: the privacy
+guarantee of the reported pipeline rests on the sample-once release and
+the $\Delta=2/K$ sensitivity, not on a zero-cost public calibration.
+Pseudocode is Algorithm~\ref{alg:precompute} in
+Appendix~\ref{app:pseudocode}.
 
 % =====================================================================
 %  APPENDICES — kept in the same file; placed after \appendix.
@@ -344,9 +355,11 @@ Algorithm~\ref{alg:precompute} in Appendix~\ref{app:pseudocode}.
 Algorithm~\ref{alg:precompute} gives the precomputation routine that
 realizes the sample-once threat model with $K$-teacher PATE
 aggregation. $\phi_T^{(k)}$ denotes the $k$-th frozen teacher
-encoder, $\mathrm{clip}(\cdot;\widehat{c})$ per-channel $L_2$ clipping
-to caps $\widehat{c}$, and $\eta\sim\mathcal{N}(0,\sigma^2)$ draws
-independent Gaussian noise per coordinate.
+encoder, $\mathrm{clip}(\cdot;\widehat{c}^{(k)})$ per-channel $L_2$
+clipping to that teacher's own caps $\widehat{c}^{(k)}$ (each teacher is
+clipped and normalized by the caps of its own cohort), and
+$\eta\sim\mathcal{N}(0,\sigma^2)$ draws independent Gaussian noise per
+coordinate.
 
 \begin{algorithm}[t]
 \caption{Sample-once PATE precompute of noisy bottlenecks.}
@@ -354,18 +367,21 @@ independent Gaussian noise per coordinate.
 \begin{algorithmic}[1]
 \Require teachers $\{\phi_T^{(k)}\}_{k=1}^{K}$ trained on disjoint
          cohorts; training images $\{x_i\}_{i=1}^{N}$;
-         per-channel caps $\widehat{c}\in\mathbb{R}^{C}$;
+         per-teacher per-channel caps
+         $\{\widehat{c}^{(k)}\}_{k=1}^{K}\subset\mathbb{R}^{C}$;
          per-channel noise scales $\sigma\in\mathbb{R}^{C}$
 \Ensure  noisy bottleneck cache
          $\mathcal{C}:\mathrm{img\_id}\!\to\!\mathbb{R}^{C\times H\times W}$
-\State $\mathcal{C} \gets \emptyset$
+\State $\mathcal{C} \gets \emptyset$;\quad
+       $\bar{c} \gets \tfrac{1}{K}\sum_{k=1}^{K}\widehat{c}^{(k)}$
+       \Comment{mean cap, for de-normalization}
 \For{$i = 1,\dots,N$}
-  \State $\bar{z}_i \gets \tfrac{1}{K}\sum_{k=1}^{K} \mathrm{clip}\bigl(\phi_T^{(k)}(x_i);\widehat{c}\bigr) \,\oslash\,\widehat{c}$
-         \Comment{aggregate unit-norm release per coordinate}
+  \State $\bar{z}_i \gets \tfrac{1}{K}\sum_{k=1}^{K} \mathrm{clip}\bigl(\phi_T^{(k)}(x_i);\widehat{c}^{(k)}\bigr) \,\oslash\,\widehat{c}^{(k)}$
+         \Comment{each teacher clipped/normalized by its own caps; unit-norm per coordinate}
   \State sample $\eta_i \in \mathbb{R}^{C\times H\times W}$ with
          $\eta_i^{(c)} \!\sim\! \mathcal{N}(0,\sigma_c^{2})$
-  \State $\widetilde{z}_i \gets (\bar{z}_i + \eta_i)\odot\widehat{c}$
-         \Comment{denormalize; pure post-processing}
+  \State $\widetilde{z}_i \gets (\bar{z}_i + \eta_i)\odot\bar{c}$
+         \Comment{de-normalize to teacher scale}
   \State $\mathcal{C}[\mathrm{img\_id}(x_i)] \gets \widetilde{z}_i$
 \EndFor
 \State \Return $\mathcal{C}$
@@ -482,12 +498,13 @@ on this teacher--student pair.
 For completeness, Table~\ref{tab:ksat} reports the full $K$-saturation
 sweep used to choose $K{=}10$ as the strongest reportable setting in
 Table~\ref{tab:mechanism-comp}. $\sigma$ at $\varepsilon{=}16$ scales
-empirically as $1/\sqrt{K}$ as predicted; Dice plateaus as $K$ grows.
+empirically as $1/K$ as predicted ($\sigma\!\propto\!\Delta\!=\!2/K$);
+Dice plateaus as $K$ grows.
 
 \begin{table}[t]
 \centering
 \small
-\caption{PATE $K$-saturation, sample-once + public proxy threat model,
+\caption{PATE $K$-saturation, sample-once threat model,
 $5$ student seeds per cell.}
 \label{tab:ksat}
 \begin{tabular}{c c c c c}

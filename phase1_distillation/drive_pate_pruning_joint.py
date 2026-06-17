@@ -79,7 +79,7 @@ def precompute_joint_cache(teachers, caps_list, train_ds, sigma,
     for t in teachers:
         t.eval()
     torch.manual_seed(seed)
-    g = torch.Generator(device=device).manual_seed(seed)
+    g = torch.Generator().manual_seed(seed)  # CPU generator (mps-safe)
     K = len(teachers)
     C = active_mask.shape[0]
     mean_caps = torch.stack([c.to(device) for c in caps_list]).mean(dim=0)
@@ -95,7 +95,7 @@ def precompute_joint_cache(teachers, caps_list, train_ds, sigma,
         agg = agg / K                                   # mean normalised bottleneck
         B, Cc, H, W = agg.shape
         agg = agg * active_mask.view(1, Cc, 1, 1).float()   # drop inactive channels
-        noise = torch.randn(B, Cc, H, W, generator=g, device=device) * sigma.view(1, Cc, 1, 1)
+        noise = torch.randn(B, Cc, H, W, generator=g).to(device) * sigma.view(1, Cc, 1, 1)
         z_noisy = denormalise(agg + noise, mean_caps)
         for b in range(B):
             cache.append(z_noisy[b].detach().cpu())
@@ -103,7 +103,8 @@ def precompute_joint_cache(teachers, caps_list, train_ds, sigma,
 
 
 def main():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = ("cuda" if torch.cuda.is_available()
+              else "mps" if torch.backends.mps.is_available() else "cpu")
     torch.manual_seed(0); np.random.seed(0)
     print(f"Device: {device}")
 
@@ -114,7 +115,7 @@ def main():
     N_train = len(train_ds)
 
     K_values      = [1, 5, 10]
-    keep_fracs    = [1.0, 0.3, 0.2, 0.1]
+    keep_fracs    = [1.0, 0.3, 0.2, 0.1, 0.05, 0.02]
     epsilons      = [2.0, 8.0, 16.0]
     student_seeds = [100, 200, 300, 400, 500]
     base_T        = 32

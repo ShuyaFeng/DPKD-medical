@@ -8,8 +8,8 @@ each teacher's bottleneck to per-teacher caps so each channel has L2 norm
 a patient affects exactly 1 of K teachers; the mean changes by ≤ 2/K per
 channel under unit-norm clipping).
 
-K ∈ {1, 3, 5} swept. At fixed per-release ε, σ scales as √(1/K) → utility
-should climb as K grows. This is the "real DP-mechanism advance" path:
+K ∈ {1, 3, 5} swept. At fixed per-release ε, σ scales as 1/K (σ ∝ Δ = 2/K)
+→ utility should climb as K grows. This is the "real DP-mechanism advance" path:
 the lift comes from a TIGHTER sensitivity, not from anything CANAL does.
 
 Compared at the same per-release ε via paired 3-seed student distillation.

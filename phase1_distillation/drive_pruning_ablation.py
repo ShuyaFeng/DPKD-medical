@@ -101,7 +101,8 @@ def run_students(train_ds, val_loader, cache, device, seeds, base_T):
 
 
 def main():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = ("cuda" if torch.cuda.is_available()
+              else "mps" if torch.backends.mps.is_available() else "cpu")
     torch.manual_seed(0); np.random.seed(0)
     print(f"Device: {device}")
 
@@ -133,9 +134,9 @@ def main():
         return m
 
     def rand_mask(frac, seed):
-        g = torch.Generator(device=device).manual_seed(seed)
+        g = torch.Generator().manual_seed(seed)  # CPU generator (mps-safe)
         m = torch.zeros(Cb_T, dtype=torch.bool, device=device)
-        idx = torch.randperm(Cb_T, generator=g, device=device)[:max(1, int(round(frac*Cb_T)))]
+        idx = torch.randperm(Cb_T, generator=g)[:max(1, int(round(frac*Cb_T)))].to(device)
         m[idx] = True
         return m
 

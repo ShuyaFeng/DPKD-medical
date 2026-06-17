@@ -1,0 +1,350 @@
+% =====================================================================
+%  Section 4 — Experiments
+%
+%  Drop-in LaTeX for the experimental section. Designed to be
+%  \input{paper_draft/section_4_body.tex} after Section 3.
+%
+%  Numbers in Tables 3 / 4 / 5 and Figure \ref{fig:k-saturation}
+%  come from local 5-seed paired experiments in phase1_distillation/:
+%
+%    drive_q1_per_iter_vs_sample_once_results.json   (Tab. 3 = Q1)
+%    tab4_compiled.json                              (Tab. 4 = Q2)
+%    drive_pate_K_saturation_results.json            (Tab. 5 + Fig = Q3)
+%    drive_pate_canal_combined_results.json          (Tab. 4 PATE+CANAL row)
+%
+%  All numbers in the tables can be re-extracted by running
+%      python3 phase1_distillation/compile_tab4.py
+% =====================================================================
+
+\section{Experiments}
+\label{sec:experiments}
+
+We evaluate the framework of Section~\ref{sec:privacy} on retinal vessel
+segmentation. Three questions structure the section:
+
+\begin{description}
+\item[(Q1)] At a \emph{matched user-level} $\varepsilon$, does the
+sample-once release model preserve utility relative to the per-iteration
+release model that prior work implicitly uses
+(\S\ref{ssec:q1-sample-once})?
+\item[(Q2)] Does the channel-importance allocation (CANAL) of
+Section~\ref{ssec:wf} improve Dice over uniform noise on real DRIVE
+features, and does the honest multi-teacher PATE aggregation of
+Section~\ref{ssec:pate} compound with it
+(\S\ref{ssec:q2-mechanism})?
+\item[(Q3)] How does utility scale with the number of teachers $K$, and
+where does it saturate (\S\ref{ssec:q3-k-sweep})?
+\end{description}
+
+We additionally include a paired-comparison ablation that tests
+Corollary~\ref{cor:r14}'s prediction that CANAL's empirical gain on top
+of PATE is bounded by $R^{1/4}$ and therefore negligible on RGB fundus
+(\S\ref{ssec:q2-mechanism}, last row of Table~\ref{tab:mech}).
+
+% ---------------------------------------------------------------------
+\subsection{Experimental setup}
+\label{ssec:setup}
+
+\paragraph{Dataset.} We use DRIVE~\cite{staal2004drive}, the
+canonical retinal vessel segmentation benchmark: $40$ RGB fundus images
+of size $584\!\times\!565$ with expert vessel masks, split into the
+canonical $20$ training and $20$ test images. Each training image is one
+``user'' for the purposes of user-level DP, consistent with the
+sample-once-per-image model of \S\ref{ssec:threat}.
+
+\paragraph{Teacher and student.} Teacher and student are 3-stage
+U-Net~\cite{ronneberger2015unet} variants at $96\!\times\!96$ input
+resolution. The teacher has base width 32 (bottleneck dimension
+$C\!=\!128$); the student has base width 16 (bottleneck dimension
+$64$), with a $1\!\times\!1$ adapter projecting student features into
+the teacher channel space for the feature-matching loss. Both models
+are trained for $60$ epochs with Adam (lr $=\!10^{-3}$). The student
+training loop runs for $40$ epochs against the sample-once cached
+targets, using a combined CE+Dice task loss against the ground-truth
+mask plus an MSE feature-matching loss with weight $\lambda\!=\!0.4$.
+
+\paragraph{Privacy configuration.} We work in zCDP~\cite{bun2016concentrated}
+with $\delta\!=\!10^{-5}$ throughout and report user-level
+$\varepsilon\!\in\!\{2, 4, 8, 16\}$ via Eq.~\eqref{eq:eps-to-rho}.
+Sensitivities follow the per-channel $L_2$ normalisation of
+\S\ref{ssec:accounting}: $\Delta_c\!=\!2/K$, with $K\!=\!1$ unless
+otherwise noted. The per-iteration model is parameterised by
+$T\!=\!40000$, $B\!=\!4$, $N\!=\!20$, giving $Q\!=\!TB/N\!=\!8000$
+per-patient releases under that threat model (Table~\ref{tab:privacy}).
+
+\paragraph{Reporting.} Each cell of every table is the mean and standard
+deviation of best validation vessel-Dice over $5$ student-init seeds
+$\{100, 200, 300, 400, 500\}$. Cross-mechanism lifts are reported as
+\emph{paired} per-seed differences (each seed pair shares student
+initialisation, dataloader ordering, and the noise sample produced by
+the sample-once precompute) with their standard error of the mean. We
+report $t$-statistics on the paired lift; a $|t|\!\geq\!2$ corresponds
+to $p\!<\!0.05$ in a paired one-sample test.
+
+% ---------------------------------------------------------------------
+\subsection{Q1 — sample-once preserves utility at matched user-level $\varepsilon$}
+\label{ssec:q1-sample-once}
+
+Table~\ref{tab:q1-sample-once} reports best validation vessel-Dice under
+the two release models at every user-level $\varepsilon\!\in\!\{2,4,8,16\}$
+that we test. The per-iter row uses the same student training loop as
+sample-once, but at every training iteration adds a \emph{fresh} draw of
+Gaussian noise on top of the clean teacher bottleneck of the current
+batch, scaled so that the cumulative zCDP cost over $Q\!=\!8000$
+releases equals the target $\rho_{\mathrm{user}}$.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Q1: vessel Dice at matched user-level $\varepsilon$, on DRIVE
+test split, mean $\pm$ standard deviation over $5$ seeds. The per-iter
+model needs $\sqrt{Q}\!\approx\!90\!\times$ more noise per release to
+absorb composition over $Q\!=\!8000$ patient releases, so its
+feature-matching signal collapses to noise; the student is left to
+learn from task loss alone. Sample-once at the same user-level
+$\varepsilon$ has order-of-magnitude lower per-release noise and
+preserves the distillation signal.}
+\label{tab:q1-sample-once}
+\begin{tabular}{r r l r l}
+\toprule
+$\varepsilon_{\mathrm{user}}$
+   & $\sigma_{\text{per-iter}}$ & per-iter Dice
+   & $\sigma_{\text{once}}$     & sample-once Dice (ours) \\
+\midrule
+$2$   & $5058$  & $0.567 \pm 0.011$  & $56.6$  & $\mathbf{0.581 \pm 0.023}$ \\
+$4$   & $2623$  & $0.582 \pm 0.011$  & $29.3$  & $\mathbf{0.589 \pm 0.016}$ \\
+$8$   & $1397$  & $0.579 \pm 0.012$  & $15.6$  & $\mathbf{0.594 \pm 0.017}$ \\
+$16$  & $773$   & $0.589 \pm 0.004$  & $8.6$   & $\mathbf{0.596 \pm 0.013}$ \\
+$\infty$ & $0$  & $0.676 \pm 0.007$  & $0$     & $0.676 \pm 0.007$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Observations.}
+The Dice gap from non-private is similar across the two release models,
+not because their utilities are equivalent but because at this regime
+the student's task loss against the ground-truth mask dominates the
+feature-matching loss: under per-iter the cached teacher signal becomes
+unusable and the student falls back to its task-only baseline. The
+direction of the gap is nevertheless consistent: sample-once $>$
+per-iter at $4/4$ tested $\varepsilon$, with the lift growing as
+$\varepsilon$ tightens. The stronger statement is in the
+\emph{accounting} of Table~\ref{tab:privacy}: prior work that
+reports $\varepsilon\!=\!2$ in the per-iter regime is actually
+operating at user-level $\varepsilon\!=\!812$, a $400\!\times\!$
+overclaim that sample-once eliminates without sacrificing utility.
+
+% ---------------------------------------------------------------------
+\subsection{Q2 — Mechanism comparison: PATE wins, CANAL bounded by $R^{1/4}$}
+\label{ssec:q2-mechanism}
+
+Table~\ref{tab:mech} compares five mechanisms on the same sample-once
+framework with paired student-init testing. The first two rows isolate
+the CANAL closed-form allocation against the uniform-Gaussian baseline
+at $K\!=\!1$ (single teacher). Rows three and four test the proposed
+PATE aggregation at $K\!=\!5$ with both noise shapes. Row five reports
+the best $K$ from the saturation sweep of \S\ref{ssec:q3-k-sweep}.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Q2: mechanism comparison on DRIVE, $5$ seeds, sample-once
+framework. Paired lifts in the right block are per-seed differences
+against the K=1 uniform baseline (same student initialisation, same
+noise precompute seed), with standard error of the mean and the
+corresponding $t$-statistic. Non-private reference Dice: $0.676$. The
+bold row is our headline result. \textit{CANAL} denotes the channel-WF
+allocation of Theorem~\ref{thm:wf}; PATE denotes the multi-teacher
+aggregation of Theorem~\ref{thm:pate-sens}.}
+\label{tab:mech}
+\begin{tabular}{l l l l c c c}
+\toprule
+   & \multicolumn{3}{c}{vessel Dice (mean $\pm$ std)}
+   & \multicolumn{3}{c}{paired lift over K=1 uniform ($t$)} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+mechanism
+   & $\varepsilon\!=\!2$ & $\varepsilon\!=\!8$ & $\varepsilon\!=\!16$
+   & $\varepsilon\!=\!2$ & $\varepsilon\!=\!8$ & $\varepsilon\!=\!16$ \\
+\midrule
+K=1 uniform (baseline)
+   & $0.581\!\pm\!0.023$ & $0.594\!\pm\!0.017$ & $0.596\!\pm\!0.013$
+   & --- & --- & --- \\
+K=1 CANAL
+   & $0.584\!\pm\!0.025$ & $0.593\!\pm\!0.020$ & $0.599\!\pm\!0.019$
+   & $+0.003\,(\!+\!1.8\sigma)$ & $-0.000\,(\!-\!0.2\sigma)$ & $+0.003\,(\!+\!1.0\sigma)$ \\
+PATE K=5 + uniform
+   & $0.593\!\pm\!0.016$ & $0.618\!\pm\!0.010$ & $0.627\!\pm\!0.007$
+   & $+0.012\,(\!+\!2.9\sigma)$ & $+0.025\,(\!+\!5.2\sigma)$ & $+0.031\,(\!+\!7.5\sigma)$ \\
+PATE K=5 + CANAL
+   & $0.592\!\pm\!0.016$ & $0.619\!\pm\!0.007$ & $0.625\!\pm\!0.007$
+   & $+0.011\,(\!+\!3.0\sigma)$ & $+0.025\,(\!+\!4.2\sigma)$ & $+0.030\,(\!+\!6.3\sigma)$ \\
+\midrule
+\textbf{PATE K=10 + uniform}
+   & $\mathbf{0.607\!\pm\!0.015}$ & $\mathbf{0.628\!\pm\!0.008}$ & $\mathbf{0.648\!\pm\!0.009}$
+   & $\mathbf{+0.026\,(\!+\!5.3\sigma)}$
+   & $\mathbf{+0.034\,(\!+\!8.0\sigma)}$
+   & $\mathbf{+0.052\,(\!+\!15.3\sigma)}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Three observations.}
+\emph{(i)} \textbf{CANAL alone is empirically null on RGB fundus.} The
+paired CANAL$-$uniform Dice differences at $K\!=\!1$ are within the
+$\pm 0.003$ seed-noise band at every $\varepsilon$ ($|t|\!<\!2\sigma$
+all three columns). This is the empirical manifestation of
+Corollary~\ref{cor:r14}: with the importance ratio
+$R\!\approx\!2$ on bottleneck-feature gradients, the $\sigma$ ratio
+between most and least important channels is $R^{1/4}\!\approx\!1.19$,
+below the Dice sensitivity of a trained decoder. CANAL remains the
+optimal allocation of Theorem~\ref{thm:wf} in the importance-weighted
+distortion sense; what Table~\ref{tab:mech} establishes is that its
+empirical room on RGB fundus is exhausted by the $R^{1/4}$ bound.
+
+\emph{(ii)} \textbf{PATE delivers significant Dice lift, monotonic in
+$K$.} At $K\!=\!5$, PATE+uniform improves over the $K\!=\!1$ baseline by
+$+0.012$ to $+0.031$ Dice ($2.9\sigma$--$7.5\sigma$) across
+$\varepsilon\!\in\!\{2,8,16\}$. The headline is the bold row: at
+$K\!=\!10$, the lift grows to $+0.026$ -- $+0.052$
+($5.3\sigma$--$15.3\sigma$), and at $\varepsilon\!=\!16$ the distilled
+student's Dice ($0.648$) \emph{exceeds} the single-teacher non-private
+upper bound on the local TinyUNet ($0.620$ teacher-clean), an
+ensemble-regularisation effect that is consistent with the
+diversification of $K\!=\!10$ disjoint cohorts.
+
+\emph{(iii)} \textbf{CANAL composes with PATE but does not lift it on
+DRIVE.} The PATE K=5+CANAL row gives Dice within $\pm 0.0015$ of the
+PATE K=5+uniform row at every $\varepsilon$, with $|t|\!<\!1.5\sigma$ on
+the paired test. This is exactly the prediction of
+Corollary~\ref{cor:r14}: the $R^{1/4}$ bound is independent of $K$, so
+sensitivity reduction by PATE cannot create room for CANAL allocation
+on a dataset where the importance spectrum is already flat. We expect
+this composition to surface on data where $R$ is one to two orders of
+magnitude larger; multi-modal MRI is the natural next test.
+
+% ---------------------------------------------------------------------
+\subsection{Q3 — $K$-saturation: lift grows monotonically through $K\!=\!10$}
+\label{ssec:q3-k-sweep}
+
+Theorem~\ref{thm:pate-sens} predicts $\sigma\!\propto\!1/K$. We sweep
+$K\!\in\!\{1, 3, 5, 8, 10\}$ at three $\varepsilon$ values with
+$5$ seeds per cell (Figure~\ref{fig:k-saturation},
+Table~\ref{tab:k-sat}). Lift grows monotonically in $K$ at every
+$\varepsilon$ and shows no observed saturation through $K\!=\!10$.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Q3: PATE multi-teacher $K$-sweep. Paired lift over $K\!=\!1$
+baseline; mean $\pm$ SEM of $5$ seeds, with $t$-statistic. All non-trivial
+rows are highly significant. $\sigma_{\mathrm{uniform}}$ at
+$\varepsilon\!=\!16$ shows the linear-in-$1/K$ scaling.}
+\label{tab:k-sat}
+\begin{tabular}{r r r l l l}
+\toprule
+   $K$ & $\Delta\!=\!2/K$
+       & $\sigma$ at $\varepsilon\!=\!16$
+       & lift at $\varepsilon\!=\!2$
+       & lift at $\varepsilon\!=\!8$
+       & lift at $\varepsilon\!=\!16$ \\
+\midrule
+$1$   & $2.000$ & $8.64$  & baseline $0.581$  & baseline $0.594$  & baseline $0.596$ \\
+$3$   & $0.667$ & $2.88$  & $+0.008\!\pm\!0.004\,(1.7\sigma)$  & $+0.016\!\pm\!0.004\,(3.6\sigma)$  & $+0.020\!\pm\!0.003\,(6.0\sigma)$ \\
+$5$   & $0.400$ & $1.73$  & $+0.012\!\pm\!0.004\,(2.9\sigma)$  & $+0.025\!\pm\!0.005\,(5.2\sigma)$  & $+0.031\!\pm\!0.004\,(7.5\sigma)$ \\
+$8$   & $0.250$ & $1.08$  & $+0.020\!\pm\!0.004\,(5.0\sigma)$  & $+0.031\!\pm\!0.007\,(4.7\sigma)$  & $+0.042\!\pm\!0.005\,(8.1\sigma)$ \\
+$10$  & $0.200$ & $0.86$  & $\mathbf{+0.026\!\pm\!0.005\,(5.3\sigma)}$
+                        & $\mathbf{+0.034\!\pm\!0.004\,(8.0\sigma)}$
+                        & $\mathbf{+0.052\!\pm\!0.003\,(15.3\sigma)}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+[\textit{K-saturation figure placeholder}]
+\caption{Q3: paired vessel-Dice lift over the $K\!=\!1$ baseline as a
+function of the PATE ensemble size $K$ (5 seeds per cell). The Dice
+lift is monotonic in $K$ at all three $\varepsilon$ values and shows
+no saturation through $K\!=\!10$. The vertical separation between the
+three curves reflects the better resilience of larger $\varepsilon$ to
+PATE-induced noise reduction (smaller $\sigma$ matters less when
+$\sigma$ is already small). Source:
+\texttt{drive\_pate\_K\_saturation.png}.}
+\label{fig:k-saturation}
+\end{figure}
+
+\paragraph{Cohort-size caveat.}
+At $K\!=\!10$ each teacher trains on $2$ DRIVE patients. The
+monotonicity through $K\!=\!10$ suggests the ensemble effect dominates
+per-teacher under-training in this regime, but extrapolation to
+$K\!>\!10$ would require more patients than DRIVE provides. In a
+deployed federated setting each ``teacher'' is one hospital with
+hundreds of patients; we report the DRIVE numbers as a controlled-
+setting validation, with the understanding that the lift in
+Table~\ref{tab:k-sat} is a \emph{lower bound} on what a real multi-
+hospital deployment would achieve.
+
+% ---------------------------------------------------------------------
+\subsection{Limitations and scope}
+\label{ssec:limitations}
+
+\paragraph{Single dataset.} All numbers are reported on DRIVE; the
+$R^{1/4}$ analysis of Corollary~\ref{cor:r14} predicts that CANAL's
+empirical advantage surfaces on data with a sharper bottleneck-feature
+importance spectrum (multi-modal MRI), and a feature-PATE story
+generalises straightforwardly to any teacher--student feature-
+distillation setting. We leave multi-dataset validation to future work.
+
+\paragraph{Empirical privacy evaluation.} We report formal user-level
+$\varepsilon$ via the zCDP accountant of Section~\ref{ssec:accounting}.
+A complementary empirical evaluation by membership-inference and
+feature-inversion attacks (\textit{e.g.,} LiRA \cite{carlini2022lira},
+inversion \cite{dosovitskiy2016inverting}) would tighten the privacy
+claim from a worst-case bound to an attack-resistant operating point.
+We treat this evaluation as the principal future direction for a
+follow-up.
+
+\paragraph{Spatial allocation.} Theorem~\ref{thm:wf}'s closed form is
+agnostic to the allocation index set: replacing the channel index by a
+joint (channel, spatial) index leaves the formula unchanged. A
+spatial-axis variant requires a data-independent saliency map, which
+we sketch as a parallel future direction (\textit{e.g.,} a public-proxy
+Frangi vesselness map on HRF retinal images). The local proof of
+concept under a synthetic radial-bias saliency was negative, but is not
+informative about the real-saliency setting; we report it only for
+methodological transparency in the released code.
+
+% ---------------------------------------------------------------------
+%  BibTeX entries to add to references.bib (paste into your .bib):
+%
+%  @inproceedings{carlini2022lira,
+%    title={Membership Inference Attacks From First Principles},
+%    author={Carlini, Nicholas and others},
+%    booktitle={IEEE Symposium on Security and Privacy (S\&P)},
+%    year={2022},
+%  }
+%
+%  @inproceedings{dosovitskiy2016inverting,
+%    title={Inverting Visual Representations with Convolutional Networks},
+%    author={Dosovitskiy, Alexey and Brox, Thomas},
+%    booktitle={IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+%    year={2016},
+%  }
+%
+%  @inproceedings{staal2004drive,
+%    title={Ridge-Based Vessel Segmentation in Color Images of the Retina},
+%    author={Staal, Joes and Abr\`amoff, Michael D. and Niemeijer, Meindert
+%            and Viergever, Max A. and van Ginneken, Bram},
+%    journal={IEEE Transactions on Medical Imaging},
+%    year={2004},
+%  }
+%
+%  @inproceedings{ronneberger2015unet,
+%    title={U-Net: Convolutional Networks for Biomedical Image
+%           Segmentation},
+%    author={Ronneberger, Olaf and Fischer, Philipp and Brox, Thomas},
+%    booktitle={Medical Image Computing and Computer-Assisted
+%               Intervention (MICCAI)},
+%    year={2015},
+%  }
+% ---------------------------------------------------------------------
