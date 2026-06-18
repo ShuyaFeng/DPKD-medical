@@ -187,7 +187,7 @@ def train_teacher(model, loader, n_epochs, lr, device, val_loader=None):
 def compute_importance(model, loader, device):
     model.eval()
     Cb = model.base * 4
-    grad_abs_sum = torch.zeros(Cb, device=device)
+    grad_energy_sum = torch.zeros(Cb, device=device)
     n = 0
     for x, y in loader:
         x, y = x.to(device), y.to(device)
@@ -201,9 +201,10 @@ def compute_importance(model, loader, device):
         e3.retain_grad()
         loss = task_loss(model.decode(e1, e2, e3), y)
         loss.backward()
-        grad_abs_sum += e3.grad.detach().abs().mean(dim=(0, 2, 3))
+        # per-channel squared-gradient energy: mean_{h,w} (dL/dA)^2
+        grad_energy_sum += e3.grad.detach().pow(2).mean(dim=(0, 2, 3))
         n += 1
-    return (grad_abs_sum / n).cpu()
+    return (grad_energy_sum / n).cpu()
 
 
 @torch.no_grad()
