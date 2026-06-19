@@ -23,19 +23,21 @@ eval "$(conda shell.bash hook 2>/dev/null)" 2>/dev/null \
   || source /share/apps/rc/software/Anaconda3/2023.07-2/etc/profile.d/conda.sh
 conda activate ${CONDA_ENV:-dpkd-cv}
 export PYTHONNOUSERSITE=1
-python3 -c "import torch" 2>/dev/null || { echo "ERROR: env not active (check conda module/env name)"; exit 1; }
-pip install --quiet huggingface_hub remotezip pyarrow nibabel scikit-image opacus 2>/dev/null
-
 export REPO=/home/fengs/DPKD-medical/phase1_distillation
 cd "$REPO"
 : "${DATASET:?set DATASET=drive|isic|brats}"
 
-# ISIC: build the full dataset if not present yet
-if [ "$DATASET" = "isic" ] && [ ! -d ../data/ISIC_HF/train ]; then
-  echo "[data] building full ISIC (2594) ..."
-  python3 download_isic.py --n 0 --size 96
-fi
-# BraTS expects data/BraTS_HF from run_prep_brats.sh (sbatch run_prep_brats.sh first)
+# Deps + data are prepared ONCE on the LOGIN node (compute nodes may lack internet):
+#   pip install remotezip opacus pyarrow nibabel scikit-image huggingface_hub
+#   python3 download_isic.py --n 0 --size 96            # ISIC
+#   python3 prep_brats.py --src <BraTS root> --size 96  # BraTS
+python3 -c "import torch, numpy, matplotlib, opacus" 2>/dev/null || {
+  echo "ERROR: env/deps missing. On the LOGIN node run:"
+  echo "  conda activate ${CONDA_ENV:-dpkd-cv} && pip install remotezip opacus pyarrow nibabel scikit-image huggingface_hub"; exit 1; }
+if [ "$DATASET" = "isic" ] && [ ! -e ../data/ISIC_HF/train/input ]; then
+  echo "ERROR: data/ISIC_HF empty. On the LOGIN node run: python3 download_isic.py --n 0 --size 96"; exit 1; fi
+if [ "$DATASET" = "brats" ] && [ ! -e ../data/BraTS_HF/train/input ]; then
+  echo "ERROR: data/BraTS_HF missing. Run prep_brats.py / run_prep_brats.sh first"; exit 1; fi
 
 SEEDS=${SEEDS:-5}; TE=${TE:-60}; SE=${SE:-40}
 echo "=== [1/3] utility comparison ($DATASET) ==="
