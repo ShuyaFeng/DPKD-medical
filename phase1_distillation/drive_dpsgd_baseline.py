@@ -67,7 +67,7 @@ def main():
     smoke = "--smoke" in sys.argv
     train_ds = DriveDataset("train", size=96)
     val_loader = DataLoader(DriveDataset("val", size=96), batch_size=4, shuffle=False)
-    epsilons = [2.0, 8.0, 16.0]
+    epsilons = [1.0, 2.0, 3.0, 4.0, 5.0]
     seeds = [100, 200, 300, 400, 500]
     if smoke:
         epsilons, seeds = [8.0], [100]

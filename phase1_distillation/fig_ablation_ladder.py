@@ -17,7 +17,7 @@ compare = L("drive_compare_pate_canal_uniform_results.json")
 combined= L("drive_pate_canal_combined_results.json")
 joint   = L("drive_pate_pruning_joint_results.json")
 abl     = L("drive_pruning_ablation_results.json")
-EPS = [2.0, 8.0, 16.0]; SQ5 = np.sqrt(5)
+EPS = [1.0, 2.0, 3.0, 4.0, 5.0]; SQ5 = np.sqrt(5)
 
 floor   = abl["no_noise"]["student_only"]["vessel_dice"]["mean"]
 ceiling = abl["no_noise"]["clean_full"]["vessel_dice"]["mean"]
@@ -51,8 +51,8 @@ rungs = [
     ("+ prune\nK=5, uniform, keep2%",      get_prune,    "#8c564b", False),
     ("Joint best\nK=10, keep2%",           get_full,     "#2ca02c", False),
 ]
-fig, ax = plt.subplots(figsize=(13, 6.8))
-nb=len(rungs); w=0.16; x=np.arange(len(EPS))
+fig, ax = plt.subplots(figsize=(15, 6.8))
+nb=len(rungs); w=0.15; x=np.arange(len(EPS))
 canal_pos=None
 for i,(name,fn,col,is_null) in enumerate(rungs):
     ms=[fn(e)[0] for e in EPS]; ss=[fn(e)[1] for e in EPS]

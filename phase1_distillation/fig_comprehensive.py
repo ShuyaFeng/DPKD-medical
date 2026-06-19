@@ -14,7 +14,7 @@ def L(n): return json.load(open(HERE / n))
 joint    = L("drive_pate_pruning_joint_results.json")
 combined = L("drive_pate_canal_combined_results.json")
 abl      = L("drive_pruning_ablation_results.json")
-EPS = [2.0, 8.0, 16.0]; SQ5 = np.sqrt(5)
+EPS = [1.0, 2.0, 3.0, 4.0, 5.0]; SQ5 = np.sqrt(5)
 try:
     dpsgd = L("drive_dpsgd_baseline_results.json"); DPSGD_PROVISIONAL = False
 except FileNotFoundError:
@@ -48,8 +48,8 @@ bars = [
     ("+ prune\nK=1 keep2%",             lambda e: jc(1,0.02,e), "#8c564b", OURS),
     ("Joint best (OURS)\nK=10 keep2%",  lambda e: jc(10,0.02,e),"#2ca02c", BEST),
 ]
-fig, ax = plt.subplots(figsize=(13.5, 6.8))
-nb=len(bars); w=0.135; x=np.arange(len(EPS))
+fig, ax = plt.subplots(figsize=(16, 6.8))
+nb=len(bars); w=0.13; x=np.arange(len(EPS))
 for i,(name,fn,col,fam) in enumerate(bars):
     ms=[fn(e)[0] for e in EPS]; ss=[fn(e)[1] for e in EPS]
     pos=x+(i-nb/2+0.5)*w

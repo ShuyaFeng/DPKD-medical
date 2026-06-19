@@ -17,13 +17,13 @@ ceiling = abl["no_noise"]["clean_full"]["vessel_dice"]["mean"]
 sw = joint["sweep"]
 Ks   = ["1", "5", "10"]
 keeps= ["1.00", "0.30", "0.20", "0.10", "0.05", "0.02"]
-nact = {k: sw["1"]["2.0"][k]["n_active"] for k in keeps}
-EPS  = ["2.0", "8.0", "16.0"]
+EPS  = ["1.0", "2.0", "3.0", "4.0", "5.0"]
+nact = {k: sw["1"][EPS[0]][k]["n_active"] for k in keeps}
 
 vmin = min(sw[K][e][k]["mean"] for K in Ks for e in EPS for k in keeps)
 vmax = max(sw[K][e][k]["mean"] for K in Ks for e in EPS for k in keeps)
 
-fig, axes = plt.subplots(1, 3, figsize=(16, 4.6))
+fig, axes = plt.subplots(1, len(EPS), figsize=(4.6 * len(EPS), 4.6))
 for ax, e in zip(axes, EPS):
     M = np.array([[sw[K][e][k]["mean"] for k in keeps] for K in Ks])  # rows=K, cols=keep
     im = ax.imshow(M, aspect="auto", cmap="viridis", vmin=vmin, vmax=vmax)

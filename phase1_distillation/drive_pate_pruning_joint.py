@@ -116,7 +116,7 @@ def main():
 
     K_values      = [1, 5, 10]
     keep_fracs    = [1.0, 0.3, 0.2, 0.1, 0.05, 0.02]
-    epsilons      = [2.0, 8.0, 16.0]
+    epsilons      = [1.0, 2.0, 3.0, 4.0, 5.0]
     student_seeds = [100, 200, 300, 400, 500]
     base_T        = 32
     Cb_T          = base_T * 4

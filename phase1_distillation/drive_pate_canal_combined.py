@@ -71,7 +71,7 @@ def main():
     val_loader = DataLoader(val_ds, batch_size=4, shuffle=False)
 
     K              = 5
-    epsilons       = [2.0, 8.0, 16.0]
+    epsilons       = [1.0, 2.0, 3.0, 4.0, 5.0]
     student_seeds  = [100, 200, 300, 400, 500]
     base_T         = 32
     Cb_T           = base_T * 4
