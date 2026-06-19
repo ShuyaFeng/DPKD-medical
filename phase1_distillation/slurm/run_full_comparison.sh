@@ -17,9 +17,13 @@
 #   optional: SEEDS=5 TE=60 SE=40
 
 module purge
-source /share/apps/rc/software/Anaconda3/2023.07-2/etc/profile.d/conda.sh
+# make conda available (Lmod module first, then fall back to sourcing the install)
+module load Anaconda3/2023.07-2 2>/dev/null || module load Anaconda3 2>/dev/null || true
+eval "$(conda shell.bash hook 2>/dev/null)" 2>/dev/null \
+  || source /share/apps/rc/software/Anaconda3/2023.07-2/etc/profile.d/conda.sh
 conda activate ${CONDA_ENV:-dpkd-cv}
 export PYTHONNOUSERSITE=1
+python3 -c "import torch" 2>/dev/null || { echo "ERROR: env not active (check conda module/env name)"; exit 1; }
 pip install --quiet huggingface_hub remotezip pyarrow nibabel scikit-image opacus 2>/dev/null
 
 export REPO=/home/fengs/DPKD-medical/phase1_distillation

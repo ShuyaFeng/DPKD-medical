@@ -13,7 +13,9 @@
 # Headline series + the multi-modal CANAL test, ε∈{1,2,3,4,5}, 3 seeds.
 
 module purge
-source /share/apps/rc/software/Anaconda3/2023.07-2/etc/profile.d/conda.sh
+module load Anaconda3/2023.07-2 2>/dev/null || module load Anaconda3 2>/dev/null || true
+eval "$(conda shell.bash hook 2>/dev/null)" 2>/dev/null \
+  || source /share/apps/rc/software/Anaconda3/2023.07-2/etc/profile.d/conda.sh
 conda activate ${CONDA_ENV:-dpkd-cv}
 export PYTHONNOUSERSITE=1
 
