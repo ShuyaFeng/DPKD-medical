@@ -36,9 +36,9 @@ def seg_loss(logits, y):
 
 
 def train_dpsgd(train_ds, val_loader, eps, seed, epochs=60, bs=8,
-                max_grad_norm=1.0, lr=5e-3, delta=1e-5):
+                max_grad_norm=1.0, lr=5e-3, delta=1e-5, in_ch=3):
     torch.manual_seed(seed); np.random.seed(seed)
-    model = TinyUNet(in_ch=3, num_classes=2, base=16).to(DEVICE)
+    model = TinyUNet(in_ch=in_ch, num_classes=2, base=16).to(DEVICE)
     model = ModuleValidator.fix(model)            # BatchNorm -> GroupNorm
     for mod in model.modules():                   # inplace ReLU breaks Opacus hooks
         if isinstance(mod, torch.nn.ReLU):
@@ -63,10 +63,23 @@ def train_dpsgd(train_ds, val_loader, eps, seed, epochs=60, bs=8,
     return evaluate_vessel_dice(model, val_loader, DEVICE), eps_spent, float(opt.noise_multiplier)
 
 
+def get_ds(name, split):
+    if name == "isic":
+        from isic_dataset import ISICDataset; return ISICDataset(split, 96), 3
+    if name == "brats":
+        from brats_dataset import BRATSDataset; return BRATSDataset(split, 96), 4
+    return DriveDataset(split, 96), 3
+
+
 def main():
     smoke = "--smoke" in sys.argv
-    train_ds = DriveDataset("train", size=96)
-    val_loader = DataLoader(DriveDataset("val", size=96), batch_size=4, shuffle=False)
+    ds_name = "drive"
+    for i, a in enumerate(sys.argv):
+        if a == "--dataset" and i + 1 < len(sys.argv):
+            ds_name = sys.argv[i + 1]
+    train_ds, in_ch = get_ds(ds_name, "train")
+    val_loader = DataLoader(get_ds(ds_name, "val")[0], batch_size=4, shuffle=False)
+    print(f"DP-SGD baseline on {ds_name} (in_ch={in_ch})")
     epsilons = [1.0, 2.0, 3.0, 4.0, 5.0]
     seeds = [100, 200, 300, 400, 500]
     if smoke:
@@ -80,7 +93,7 @@ def main():
     for eps in epsilons:
         dices, eps_check, nm = [], None, None
         for s in seeds:
-            d, e_sp, nmul = train_dpsgd(train_ds, val_loader, eps, s, **cfg)
+            d, e_sp, nmul = train_dpsgd(train_ds, val_loader, eps, s, in_ch=in_ch, **cfg)
             dices.append(d); eps_check = e_sp; nm = nmul
             print(f"  ε={eps} seed={s}: Dice={d:.4f}  (acct ε={e_sp:.3f}, σ_noise={nmul:.3f})")
         m, sd = float(np.mean(dices)), float(np.std(dices))
@@ -90,8 +103,9 @@ def main():
         }
         print(f" → ε={eps}: {m:.4f} ± {sd:.4f}\n")
     if not smoke:
-        (HERE/"drive_dpsgd_baseline_results.json").write_text(json.dumps(results, indent=2))
-        print("saved drive_dpsgd_baseline_results.json")
+        fname = "drive_dpsgd_baseline_results.json" if ds_name == "drive" else f"{ds_name}_dpsgd_results.json"
+        (HERE / fname).write_text(json.dumps(results, indent=2))
+        print(f"saved {fname}")
 
 
 if __name__ == "__main__":

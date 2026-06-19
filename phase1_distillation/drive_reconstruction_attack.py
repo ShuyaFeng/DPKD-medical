@@ -24,14 +24,14 @@ HERE = Path(__file__).parent
 
 
 class Recon(nn.Module):
-    def __init__(self, cin):
+    def __init__(self, cin, out_ch=3):
         super().__init__()
         self.net = nn.Sequential(
             nn.Conv2d(cin, 64, 3, padding=1), nn.ReLU(True),
             nn.ConvTranspose2d(64, 32, 2, 2), nn.ReLU(True),     # 24 -> 48
             nn.Conv2d(32, 32, 3, padding=1), nn.ReLU(True),
             nn.ConvTranspose2d(32, 16, 2, 2), nn.ReLU(True),     # 48 -> 96
-            nn.Conv2d(16, 3, 3, padding=1), nn.Sigmoid(),
+            nn.Conv2d(16, out_ch, 3, padding=1), nn.Sigmoid(),
         )
 
     def forward(self, x):

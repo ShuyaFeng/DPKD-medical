@@ -41,12 +41,26 @@ def agg_feats(teachers, caps_list, ds, device):
     return torch.cat(out)                                    # (N,C,24,24)
 
 
+def get_ds(name, split):
+    if name == "isic":
+        from isic_dataset import ISICDataset; return ISICDataset(split, 96), 3
+    if name == "brats":
+        from brats_dataset import BRATSDataset; return BRATSDataset(split, 96), 4
+    return DriveDataset(split, 96), 3
+
+
 def main():
+    import sys
+    ds_name = "drive"
+    for i, a in enumerate(sys.argv):
+        if a == "--dataset" and i + 1 < len(sys.argv):
+            ds_name = sys.argv[i + 1]
     device = ("cuda" if torch.cuda.is_available()
               else "mps" if torch.backends.mps.is_available() else "cpu")
-    print(f"Device: {device}  (auditing joint K={K}, keep={KEEP:.0%})")
-    train_ds, val_ds = DriveDataset("train", 96), DriveDataset("val", 96)
-    teachers, caps_list = train_K_teachers(train_ds, K, device, n_epochs=60)
+    print(f"Device: {device}  (auditing joint K={K}, keep={KEEP:.0%}, dataset={ds_name})")
+    train_ds, in_ch = get_ds(ds_name, "train")
+    val_ds, _ = get_ds(ds_name, "val")
+    teachers, caps_list = train_K_teachers(train_ds, K, device, n_epochs=60, in_ch=in_ch)
     Cb = teachers[0].base * 4
 
     imp = shared_importance(teachers, DataLoader(train_ds, batch_size=4), device).to(device)
@@ -86,7 +100,7 @@ def main():
     # ---------- reconstruction ----------
     Fm_masked = (Fm.to(device) * active.view(1, Cb, 1, 1).float())     # zero inactive
     imgs = torch.cat([x for x, _ in DataLoader(train_ds, batch_size=4)]).to(device)
-    dec = Recon(Cb).to(device); opt = torch.optim.Adam(dec.parameters(), lr=2e-3)
+    dec = Recon(Cb, out_ch=in_ch).to(device); opt = torch.optim.Adam(dec.parameters(), lr=2e-3)
     for _ in range(400):
         opt.zero_grad(); loss = ((dec(Fm_masked) - imgs) ** 2).mean(); loss.backward(); opt.step()
     Xn = imgs.cpu().numpy().transpose(0, 2, 3, 1)
@@ -107,23 +121,26 @@ def main():
     out = {"config": f"joint K={K} keep={KEEP}", "n_active": int(n_active),
            "mia": mia, "reconstruction": {k: {kk: v[kk] for kk in ("epsilon", "psnr", "ssim")}
                                           for k, v in recon.items()}}
-    (HERE / "drive_joint_attack_results.json").write_text(json.dumps(out, indent=2))
+    tag = "drive_joint_attack" if ds_name == "drive" else f"{ds_name}_joint_attack"
+    (HERE / f"{tag}_results.json").write_text(json.dumps(out, indent=2))
 
-    # panel
+    # panel (RGB datasets show 3ch; multi-modal shows modality 0)
     import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+    def disp(a): return a if a.shape[-1] == 3 else a[..., 0]
     show = [0, 5, 10]; panel = ["original", "no-noise", "ε=16", "ε=2"]
     fig, axes = plt.subplots(len(show), len(panel), figsize=(2.1 * len(panel), 2.1 * len(show)))
     for r, idx in enumerate(show):
         for c, key in enumerate(panel):
-            ax = axes[r, c]; ax.imshow(Xn[idx] if key == "original" else recon[key]["img"][idx])
+            ax = axes[r, c]; ax.imshow(disp(Xn[idx] if key == "original" else recon[key]["img"][idx]))
             ax.set_xticks([]); ax.set_yticks([])
             if r == 0:
                 ax.set_title(key if key in ("original", "no-noise") else
                              f"{key} (PSNR {recon[key]['psnr']:.0f})", fontsize=9)
     fig.suptitle(f"Reconstruction — advocated joint config (K={K}, keep {KEEP:.0%}, {n_active} ch)",
                  fontweight="bold")
-    fig.tight_layout(rect=[0, 0, 1, 0.96]); fig.savefig(HERE / "fig_joint_attack_recon.png", dpi=140)
-    print("saved drive_joint_attack_results.json + fig_joint_attack_recon.png")
+    figname = "fig_joint_attack_recon.png" if ds_name == "drive" else f"fig_{ds_name}_joint_attack_recon.png"
+    fig.tight_layout(rect=[0, 0, 1, 0.96]); fig.savefig(HERE / figname, dpi=140)
+    print(f"saved {tag}_results.json + {figname}")
 
 
 if __name__ == "__main__":
