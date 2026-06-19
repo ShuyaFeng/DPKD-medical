@@ -57,13 +57,13 @@ def partition_dataset(n: int, K: int) -> List[List[int]]:
     return out
 
 
-def train_K_teachers(train_ds, K: int, device, n_epochs=60, lr=1e-3, base=32):
-    """Train K teachers, each on its disjoint patient cohort."""
+def train_K_teachers(train_ds, K: int, device, n_epochs=60, lr=1e-3, base=32, in_ch=3):
+    """Train K teachers, each on its disjoint patient cohort. in_ch=4 for BraTS."""
     partitions = partition_dataset(len(train_ds), K)
     teachers, caps_list = [], []
     for k, idxs in enumerate(partitions):
         torch.manual_seed(1000 + k)
-        teacher = TinyUNet(in_ch=3, num_classes=2, base=base).to(device)
+        teacher = TinyUNet(in_ch=in_ch, num_classes=2, base=base).to(device)
         subset = Subset(train_ds, idxs)
         bs = min(4, len(idxs))
         sub_loader = DataLoader(subset, batch_size=bs, shuffle=True)

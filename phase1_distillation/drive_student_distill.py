@@ -83,10 +83,10 @@ def precompute_cache(teacher, train_ds, caps, sigma, device, seed: int):
 
 def train_student_distill(train_ds, val_loader, cache, device,
                           student_base=16, teacher_base=32,
-                          n_epochs=40, lr=1e-3, lambda_feat=0.4, seed=2):
-    """Train student from scratch on (cached noisy features + GT labels)."""
+                          n_epochs=40, lr=1e-3, lambda_feat=0.4, seed=2, in_ch=3):
+    """Train student from scratch on (cached noisy features + GT labels). in_ch=4 for BraTS."""
     torch.manual_seed(seed)
-    student = TinyUNet(in_ch=3, num_classes=2, base=student_base).to(device)
+    student = TinyUNet(in_ch=in_ch, num_classes=2, base=student_base).to(device)
     adapter = Adapter(student_base * 4, teacher_base * 4).to(device)
     opt = torch.optim.Adam(
         list(student.parameters()) + list(adapter.parameters()), lr=lr,
