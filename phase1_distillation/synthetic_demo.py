@@ -239,11 +239,12 @@ def compute_channel_importance(model, loader, device):
     """
     For each batch, do a forward pass that goes encoder -> bottleneck ->
     decoder -> logits -> task_loss, then take dL/dA at the bottleneck and
-    average |dL/dA| over (batch, H, W) to get a (C,) importance vector.
+    average (dL/dA)^2 over (batch, H, W) — squared-gradient energy — to get a
+    (C,) importance vector. (Matches drive_local_demo.compute_importance.)
     """
     model.eval()
     bn_channels = model.base * 4
-    grad_abs_sum = torch.zeros(bn_channels, device=device)
+    grad_energy_sum = torch.zeros(bn_channels, device=device)
     n = 0
 
     for x, y in loader:
@@ -257,10 +258,10 @@ def compute_channel_importance(model, loader, device):
         loss.backward()
 
         grad = e3.grad.detach()                                  # (B, C, H, W)
-        grad_abs_sum += grad.abs().mean(dim=(0, 2, 3))           # (C,)
+        grad_energy_sum += grad.pow(2).mean(dim=(0, 2, 3))       # (C,) squared-grad energy
         n += 1
 
-    return (grad_abs_sum / n).cpu()
+    return (grad_energy_sum / n).cpu()
 
 
 # =============================================================================
