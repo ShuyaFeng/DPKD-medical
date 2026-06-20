@@ -24,7 +24,7 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, str(Path(__file__).parent))
 from drive_local_demo import (
     DriveDataset, TinyUNet, train_teacher, evaluate_vessel_dice,
-    compute_importance, collect_caps,
+    compute_importance, get_importance, collect_caps,
 )
 from synthetic_demo import eps_to_rho
 from drive_student_distill import train_student_distill
@@ -39,6 +39,12 @@ def correct_waterfilling_sigma(deltas, importance, rho):
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--importance", default="grad_energy",
+                    choices=["grad_energy", "act_norm"])
+    args = ap.parse_args()
+
     device = "mps" if torch.backends.mps.is_available() else "cpu"
     torch.manual_seed(0); np.random.seed(0)
     print(f"Device: {device}")
@@ -53,7 +59,7 @@ def main():
     t_loader = DataLoader(train_ds, batch_size=4, shuffle=True)
     train_teacher(teacher, t_loader, n_epochs=60, lr=1e-3, device=device)
     clean_dice = evaluate_vessel_dice(teacher, val_loader, device)
-    importance = compute_importance(teacher, t_loader, device).to(device)
+    importance = get_importance(args.importance, teacher, t_loader, device).to(device)
     caps       = collect_caps(teacher, t_loader, device).to(device)
     Cb_T = importance.shape[0]
     for p in teacher.parameters():
@@ -129,6 +135,7 @@ def main():
 
     # ---- save ----
     out = {
+        "importance": args.importance,
         "clean_teacher": clean_dice,
         "epsilons": epsilons,
         "student_seeds": student_seeds,
@@ -136,7 +143,7 @@ def main():
         "K1_CANAL":   {str(e): canal_data[e]      for e in epsilons},
         "K5_PATE":    {str(e): k5_pate[str(e)]   for e in epsilons},
     }
-    out_path = Path(__file__).parent / "drive_compare_pate_canal_uniform_results.json"
+    out_path = Path(__file__).parent / f"drive_compare_pate_canal_uniform_{args.importance}_results.json"
     out_path.write_text(json.dumps(out, indent=2, default=str))
     print(f"\nSaved JSON: {out_path}")
 
@@ -215,7 +222,7 @@ def main():
     fig.suptitle("Contribution (ii) showdown: PATE wins, CANAL ≈ uniform",
                  fontweight="bold", fontsize=13)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
-    plot_path = Path(__file__).parent / "drive_compare_pate_canal_uniform.png"
+    plot_path = Path(__file__).parent / f"drive_compare_pate_canal_uniform_{args.importance}.png"
     fig.savefig(plot_path, dpi=150)
     print(f"Saved plot: {plot_path}")
 
