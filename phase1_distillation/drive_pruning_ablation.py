@@ -65,6 +65,21 @@ def masked_uniform_sigma(deltas, rho, active_mask):
     return sigma
 
 
+def correct_waterfilling_sigma(deltas, importance, rho):
+    """WF σ with the correct factor-of-2 in zCDP."""
+    s = importance.clamp(min=1e-12)
+    kappa = ((deltas * s.sqrt()).sum() / (2.0 * rho)).sqrt()
+    return kappa * deltas.sqrt() / s.pow(0.25)
+
+
+def masked_waterfilling_sigma(deltas, importance, rho, active_mask):
+    sigma = torch.zeros_like(deltas)
+    if active_mask.any():
+        sigma[active_mask] = correct_waterfilling_sigma(
+            deltas[active_mask], importance[active_mask], rho)
+    return sigma
+
+
 @torch.no_grad()
 def precompute(teacher, train_ds, caps, sigma, active_mask, device, seed):
     """sigma=None → clean (no noise). active_mask=None → full channels."""
@@ -105,6 +120,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--importance", default="grad_energy",
                     choices=["grad_energy", "act_norm"])
+    ap.add_argument("--allocation", default="uniform",
+                    choices=["uniform", "waterfilling"])
     args = ap.parse_args()
 
     device = ("cuda" if torch.cuda.is_available()
@@ -146,7 +163,7 @@ def main():
         m[idx] = True
         return m
 
-    results = {"importance": args.importance, "C": Cb_T, "K": K, "epsilons": epsilons, "seeds": seeds,
+    results = {"importance": args.importance, "allocation": args.allocation, "C": Cb_T, "K": K, "epsilons": epsilons, "seeds": seeds,
                "no_noise": {}, "noisy": {}}
 
     # --- no-noise references ---
@@ -182,8 +199,13 @@ def main():
             ("rand_keep02", rand_mask(0.02, 22)),
         ]
         for tag, mask in conds:
-            sigma = masked_uniform_sigma(deltas, rho, mask) if mask is not None \
-                    else uniform_sigma(deltas, rho)
+            if args.allocation == "waterfilling":
+                sigma = masked_waterfilling_sigma(deltas, importance, rho, mask) \
+                        if mask is not None \
+                        else correct_waterfilling_sigma(deltas, importance, rho)
+            else:
+                sigma = masked_uniform_sigma(deltas, rho, mask) if mask is not None \
+                        else uniform_sigma(deltas, rho)
             cache = precompute(teacher, train_ds, caps, sigma, mask, device,
                                seed=42 + int(eps*10) + hash(tag) % 100)
             ml = run_students(train_ds, val_loader, cache, device, seeds, base_T)
@@ -192,7 +214,7 @@ def main():
             print(f"    {tag:12s} vd={sm['vessel_dice']['mean']:.4f} "
                   f"mdice={sm['mdice']['mean']:.4f} miou={sm['miou']['mean']:.4f}")
 
-    out = Path(__file__).parent / f"drive_pruning_ablation_{args.importance}_results.json"
+    out = Path(__file__).parent / f"drive_pruning_ablation_{args.importance}_{args.allocation}_results.json"
     with out.open("w") as f:
         json.dump(results, f, indent=2)
     print(f"\nWrote: {out}")
