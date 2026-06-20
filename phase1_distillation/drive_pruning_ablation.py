@@ -49,7 +49,7 @@ from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).parent))
 from drive_local_demo import (
-    DriveDataset, TinyUNet, train_teacher, compute_importance,
+    DriveDataset, TinyUNet, train_teacher, compute_importance, get_importance,
     collect_caps, evaluate_vessel_dice, evaluate_metrics, summarize_metrics,
 )
 from synthetic_demo import (
@@ -101,6 +101,12 @@ def run_students(train_ds, val_loader, cache, device, seeds, base_T):
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--importance", default="grad_energy",
+                    choices=["grad_energy", "act_norm"])
+    args = ap.parse_args()
+
     device = ("cuda" if torch.cuda.is_available()
               else "mps" if torch.backends.mps.is_available() else "cpu")
     torch.manual_seed(0); np.random.seed(0)
@@ -121,7 +127,7 @@ def main():
     print("\n[1/3] Train single teacher...")
     teacher = TinyUNet(in_ch=3, num_classes=2, base=base_T).to(device)
     train_teacher(teacher, train_loader, n_epochs=60, lr=1e-3, device=device)
-    importance = compute_importance(teacher, train_loader, device).to(device)
+    importance = get_importance(args.importance, teacher, train_loader, device).to(device)
     caps = collect_caps(teacher, train_loader, device).to(device)
     for p in teacher.parameters():
         p.requires_grad_(False)
@@ -140,7 +146,7 @@ def main():
         m[idx] = True
         return m
 
-    results = {"C": Cb_T, "K": K, "epsilons": epsilons, "seeds": seeds,
+    results = {"importance": args.importance, "C": Cb_T, "K": K, "epsilons": epsilons, "seeds": seeds,
                "no_noise": {}, "noisy": {}}
 
     # --- no-noise references ---
@@ -186,7 +192,7 @@ def main():
             print(f"    {tag:12s} vd={sm['vessel_dice']['mean']:.4f} "
                   f"mdice={sm['mdice']['mean']:.4f} miou={sm['miou']['mean']:.4f}")
 
-    out = Path(__file__).parent / "drive_pruning_ablation_results.json"
+    out = Path(__file__).parent / f"drive_pruning_ablation_{args.importance}_results.json"
     with out.open("w") as f:
         json.dump(results, f, indent=2)
     print(f"\nWrote: {out}")

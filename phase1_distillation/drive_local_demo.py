@@ -208,6 +208,30 @@ def compute_importance(model, loader, device):
 
 
 @torch.no_grad()
+def compute_importance_actnorm(model, loader, device):
+    """Per-channel activation L2 norm importance (no backward needed)."""
+    model.eval()
+    Cb = model.base * 4
+    act_norm_sum = torch.zeros(Cb, device=device)
+    n = 0
+    for x, _ in loader:
+        x = x.to(device)
+        _, _, e3 = model.encode(x)              # (B, C, H, W)
+        act_norm_sum += e3.flatten(2).norm(dim=2).mean(dim=0)
+        n += 1
+    return (act_norm_sum / n).cpu()
+
+
+def get_importance(method, model, loader, device):
+    """Dispatch channel-importance by name (gradient-energy stays default)."""
+    if method == "grad_energy":
+        return compute_importance(model, loader, device)
+    if method == "act_norm":
+        return compute_importance_actnorm(model, loader, device)
+    raise ValueError(f"unknown importance method: {method}")
+
+
+@torch.no_grad()
 def collect_caps(model, loader, device, q: float = 0.9):
     model.eval()
     norms = []
