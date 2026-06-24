@@ -1,5 +1,6 @@
+# -*- coding: utf-8 -*-
 """
-SBT — Sparsity-induced Bottleneck Training — pipeline.
+SBT - Sparsity-induced Bottleneck Training - pipeline.
 
 Goal: make TinyUNet's bottleneck channel importance heterogeneous (R >> 2),
 so CANAL's R^{1/4} advantage has real room.
@@ -64,7 +65,7 @@ def load_dataset(name: str, size: int):
 
 
 # ----------------------------------------------------------------------------
-# SBT training — task loss + lambda_sbt * mean(|e3|)
+# SBT training - task loss + lambda_sbt * mean(|e3|)
 # ----------------------------------------------------------------------------
 
 def train_teacher_sbt(train_ds, n_epochs, lr, device, in_ch, lambda_sbt,
@@ -125,7 +126,7 @@ def shared_actnorm_importance(teachers, loader, device):
 
 
 # ----------------------------------------------------------------------------
-# Stage 1 — lambda sweep on K=1
+# Stage 1 - lambda sweep on K=1
 # ----------------------------------------------------------------------------
 
 def stage_1(args, device):
@@ -198,7 +199,7 @@ def stage_1(args, device):
 
 
 # ----------------------------------------------------------------------------
-# Stage 2 — 3-method sweep on SBT teachers
+# Stage 2 - 3-method sweep on SBT teachers
 # ----------------------------------------------------------------------------
 
 def stage_2(args, device):
@@ -333,7 +334,7 @@ def stage_2(args, device):
 
     # ---- final summary + plot ----
     print("\n" + "=" * 96)
-    print(f"SBT 3-method sweep  —  {args.dataset}  —  lambda={args.lambda_sbt:.0e}  "
+    print(f"SBT 3-method sweep  -  {args.dataset}  -  lambda={args.lambda_sbt:.0e}  "
           f"R(K=10)={R10:.2f}")
     print("=" * 96)
     hdr = f"{'eps':>6}  " + "  ".join(f"{name[:24]:>24s}" for name in results["series"])
@@ -343,7 +344,7 @@ def stage_2(args, device):
         row = f"{eps:>6.2f}  "
         for name in results["series"]:
             m = results["series"][name][str(eps)]
-            row += f"{m['mean']:>10.4f} ± {m['std']:.4f}    "
+            row += f"{m['mean']:>10.4f} +/- {m['std']:.4f}    "
         print(row)
     print("=" * 96)
 
