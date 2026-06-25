@@ -1,0 +1,12 @@
+==========================================
+ISIC full comparison experiment
+Job ID: 39094636
+Node: c0255
+Start: Sat Jun 20 01:28:13 CDT 2026
+==========================================
+Active conda env: mmseg-cu124-240
+Python 3.10.18
+CUDA available: True
+Device: NVIDIA A100 80GB PCIe
+ERROR: data/ISIC_HF not found. Run on login node first:
+  python download_isic.py --n 0

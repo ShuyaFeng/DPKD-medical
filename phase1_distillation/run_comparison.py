@@ -50,6 +50,10 @@ def get_dataset(name, split, size):
         from drive_local_demo import DriveDataset; return DriveDataset(split, size), 3
     if name == "isic":
         from isic_dataset import ISICDataset; return ISICDataset(split, size), 3
+    if name == "kvasir":
+        from kvasir_dataset import KvasirDataset; return KvasirDataset(split, size), 3
+    if name == "busi":
+        from busi_dataset import BUSIDataset; return BUSIDataset(split, size), 1
     if name == "brats":
         from brats_dataset import BRATSDataset; return BRATSDataset(split, size), 4
     raise ValueError(name)
@@ -57,7 +61,7 @@ def get_dataset(name, split, size):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", required=True, choices=["drive", "isic", "brats"])
+    ap.add_argument("--dataset", required=True, choices=["drive", "isic", "kvasir", "busi", "brats"])
     ap.add_argument("--size", type=int, default=96)
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--epsilons", type=str, default="2,4,8,16")

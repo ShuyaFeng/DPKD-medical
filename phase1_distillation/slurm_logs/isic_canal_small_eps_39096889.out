@@ -1,0 +1,14 @@
+==========================================
+ISIC K=5/K=10 CANAL small-epsilon experiment
+Job ID: 39096889
+Node: c0254
+Start: Sun Jun 21 03:53:56 CDT 2026
+==========================================
+Active conda env: mmseg-cu124-240
+Python 3.10.18
+CUDA available: True
+Device: NVIDIA A100 80GB PCIe
+Found data: train=2076 val=518
+==========================================
+Starting: K=5,10 uniform vs CANAL at eps=0.5,1  seeds=5 te=60 se=40
+==========================================

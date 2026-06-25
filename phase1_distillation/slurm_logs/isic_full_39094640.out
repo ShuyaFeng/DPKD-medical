@@ -1,0 +1,14 @@
+==========================================
+ISIC full comparison experiment
+Job ID: 39094640
+Node: c0255
+Start: Sat Jun 20 01:34:11 CDT 2026
+==========================================
+Active conda env: mmseg-cu124-240
+Python 3.10.18
+CUDA available: True
+Device: NVIDIA A100 80GB PCIe
+Found data: train=2076 val=518
+==========================================
+Starting full run: seeds=5 te=60 se=40
+==========================================
