@@ -47,16 +47,18 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 echo
 
 KS=${KS:-1,3,5,10}
+METHODS=${METHODS:-uniform,CANAL}
 EPS=${EPS:-0.1,0.5,1,2,4,6,8}
 SEEDS=${SEEDS:-5}
 OUT_TAG=${OUT_TAG:-}
 TE=${TE:-50}
 SE=${SE:-40}
 
-echo "[K-sweep] Ks=$KS eps=$EPS seeds=$SEEDS out_tag=$OUT_TAG te=$TE se=$SE"
+echo "[K-sweep] Ks=$KS methods=$METHODS eps=$EPS seeds=$SEEDS out_tag=$OUT_TAG te=$TE se=$SE"
 
 python3 isic_K_eps_sweep.py \
     --Ks "$KS" \
+    --methods "$METHODS" \
     --epsilons "$EPS" \
     --seeds "$SEEDS" \
     --te "$TE" --se "$SE" \

@@ -67,6 +67,8 @@ def main():
     ap.add_argument("--size", type=int, default=96)
     ap.add_argument("--seeds", type=int, default=5)
     ap.add_argument("--Ks", type=str, default="1,3,5,10")
+    ap.add_argument("--methods", type=str, default="uniform,CANAL",
+                    help="comma-separated subset of {uniform,CANAL}")
     ap.add_argument("--epsilons", type=str, default="0.1,0.5,1,2,4,6,8")
     ap.add_argument("--te", type=int, default=50, help="teacher epochs")
     ap.add_argument("--se", type=int, default=40, help="student epochs")
@@ -77,6 +79,8 @@ def main():
     device = ("cuda" if torch.cuda.is_available()
               else "mps" if torch.backends.mps.is_available() else "cpu")
     K_LIST = [int(k) for k in args.Ks.split(",")]
+    METHODS = [m.strip() for m in args.methods.split(",")]
+    assert all(m in ("uniform", "CANAL") for m in METHODS), f"bad --methods: {METHODS}"
     EPS = [float(e) for e in args.epsilons.split(",")]
     SEEDS = list(range(100, 100 + args.seeds * 100, 100))
 
@@ -160,12 +164,12 @@ def main():
         }
 
     # ---- sweep K x eps x method ----
-    total = len(K_LIST) * len(EPS) * 2
+    total = len(K_LIST) * len(EPS) * len(METHODS)
     done = 0
     job_t0 = time.time()
     for K in K_LIST:
         deltas = torch.full((Cb,), 2.0 / K, device=device)
-        for method in ["uniform", "CANAL"]:
+        for method in METHODS:
             series_key = f"PATE+{method} (K={K})"
             results["series"][series_key] = {}
             for eps in EPS:
@@ -218,7 +222,7 @@ def main():
         styles_m = {"uniform": "-", "CANAL": "--"}
         markers_m = {"uniform": "o", "CANAL": "^"}
         for K in K_LIST:
-            for method in ["uniform", "CANAL"]:
+            for method in METHODS:
                 key = f"PATE+{method} (K={K})"
                 d = results["series"][key]
                 means = [d[str(e)]["mean"] for e in EPS]
