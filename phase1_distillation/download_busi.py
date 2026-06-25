@@ -16,6 +16,18 @@ Download the zip first via the Kaggle CLI:
   kaggle datasets download -d aryashah2k/breast-ultrasound-images-dataset
 
 Usage:  python download_busi.py --n 0 --size 96
+
+KNOWN DATA QUALITY NOTE:
+The original BUSI dataset (confirmed via the Kaggle mirror used here:
+aryashah2k/breast-ultrasound-images-dataset) contains one duplicate image:
+benign (433).png and malignant (145).png are pixel-identical scans with
+two different hand-drawn mask annotations (1.27% vs 1.65% lesion area).
+This is an upstream data artifact, not a bug in this script -- confirmed
+by comparing raw bytes directly in the source zip.
+With the default --seed 0, both copies land in `train` (never `val`), so
+there is no train/val leakage. If you change --seed, re-run the duplicate
+check before trusting results.
+
 """
 import argparse, zipfile, random, re
 from pathlib import Path

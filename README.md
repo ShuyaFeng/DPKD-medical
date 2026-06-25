@@ -74,6 +74,19 @@ A working open mirror is the Hugging Face dataset
 `Zomba/DRIVE-digital-retinal-images-for-vessel-extraction`. Inspect the
 license terms before redistributing the data.
 
+### Kvasir-SEG
+Official source: https://datasets.simula.no/downloads/kvasir-seg.zip
+(1000 images, direct download, no registration).
+
+### BUSI
+Source: Kaggle mirror `aryashah2k/breast-ultrasound-images-dataset`
+(the official Cairo University host blocks automated access).
+**Known data quality note:** one duplicate image exists in the source
+data (`benign (433).png` == `malignant (145).png`, pixel-identical,
+different mask annotations). Confirmed upstream, not a pipeline bug.
+With the default `--seed 0`, both copies land in `train` (no val
+leakage). See `download_busi.py` docstring for details.
+
 ## Running the Phase 0 scripts
 
 All scripts are pure NumPy/SciPy/scikit-image — no GPU, no training. Each
