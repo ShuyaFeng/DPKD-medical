@@ -1,12 +1,13 @@
 """
-Targeted comparison: K=3, uniform vs CANAL (water-filling), at epsilon=2.0,
-on BUSI (breast ultrasound).
+Targeted comparison: K=3, uniform vs CANAL (water-filling), across the
+full epsilon sweep requested for the paper's Table 4, on ISIC 2018.
 
-Replicates the standout ISIC result (K=3 at eps=2, largest CANAL-vs-uniform
-lift) on a third, genuinely independent dataset and modality (grayscale
-ultrasound, in_ch=1) before committing to the full sweep.
+Uses the honest CANAL accounting (correct_waterfilling_sigma_honest) added
+in commit cd58689: charges rho_imp = ALPHA_IMP * rho for releasing the
+(data-dependent) importance vector, so the reported epsilon is the true
+total cost, matching the uniform baseline at the same epsilon.
 
-Saves results/busi_canal_k3_eps2_results.json
+Saves results/isic_canal_k3_eps2_results.json
 """
 import argparse, sys, json
 from pathlib import Path
@@ -20,29 +21,8 @@ from drive_pate_canal_combined import (
     correct_waterfilling_sigma, correct_waterfilling_sigma_honest,
 )
 
-# NOTE on CLIP_IMP: this is a provisional value, not a derived bound.
-# We measured the real importance values produced on BUSI (K=3, full
-# 60-epoch teachers, matching the real experiment):
-#
-#   train_ds = BUSIDataset("train", 96)
-#   tk = train_K_teachers(train_ds, 3, dev, n_epochs=60, in_ch=1)
-#   imp = shared_importance(tk[0], DataLoader(train_ds, batch_size=8), dev)
-#   print(imp.min(), imp.max(), imp.mean())
-#   -> min=1.9e-9  max=3.4e-8  mean=9.3e-9
-#
-# CLIP_IMP=1e-8 was chosen because it's the same order of magnitude as
-# these measured values, so the noise added to importance stays
-# comparable to the real signal rather than overwhelming it. This is an
-# empirical calibration based on observed output, not a derived
-# per-sample sensitivity bound -- confirming the formally correct value
-# (and whether explicit clipping should be added inside
-# compute_importance() itself) is still open.
-#
-# Confirmed: with this value, CANAL beats uniform at every epsilon on
-# BUSI (see results/busi_canal_k3_eps2_results.json). Not yet checked
-# on Kvasir/ISIC, whose importance scale may differ.
 ALPHA_IMP = 0.1
-CLIP_IMP = 1e-8
+CLIP_IMP = 100.0
 from drive_student_distill import train_student_distill
 from synthetic_demo import eps_to_rho
 
@@ -68,10 +48,10 @@ def get_dataset(name, split, size):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", default="busi", choices=["drive", "isic", "kvasir", "busi", "brats"])
+    ap.add_argument("--dataset", default="isic", choices=["drive", "isic", "kvasir", "busi", "brats"])
     ap.add_argument("--size", type=int, default=96)
     ap.add_argument("--seeds", type=int, default=5)
-    ap.add_argument("--epsilons", type=str, default="2")
+    ap.add_argument("--epsilons", type=str, default="0.1,0.5,1,2,4,6,8")
     ap.add_argument("--te", type=int, default=60, help="teacher epochs")
     ap.add_argument("--se", type=int, default=40, help="student epochs")
     args = ap.parse_args()
@@ -125,7 +105,7 @@ def main():
     R = {"dataset": args.dataset, "in_ch": in_ch, "train": len(train_ds), "epsilons": EPS,
          "seeds": SEEDS, "K_values": K_VALUES, "series": {}}
 
-    print("\n[K=3: uniform vs CANAL at eps=2]")
+    print("\n[K=3: uniform vs CANAL, full eps sweep]")
     R["series"]["PATE K=3 uniform"] = sweep(3, canal=False)
     R["series"]["PATE K=3 + CANAL"] = sweep(3, canal=True)
 
