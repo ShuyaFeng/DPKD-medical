@@ -56,8 +56,13 @@ SE=${SE:-40}
 TEACHER_BASE=${TEACHER_BASE:-32}
 STUDENT_BASE=${STUDENT_BASE:-0}
 OUT_TAG=${OUT_TAG:-}
+SKIP_RANDOM=${SKIP_RANDOM:-0}     # set to 1 to skip random_subsample control
 
-echo "[honest_subsample] K_LIST=$K_LIST  eps=$EPS  keep_fracs=$KEEP_FRACS  seeds=$SEEDS  alpha=$ALPHA_IMP  clip=$CLIP_IMP  tb=$TEACHER_BASE  sb=$STUDENT_BASE  tag=$OUT_TAG"
+echo "[honest_subsample] K_LIST=$K_LIST  eps=$EPS  keep_fracs=$KEEP_FRACS  seeds=$SEEDS  alpha=$ALPHA_IMP  clip=$CLIP_IMP  tb=$TEACHER_BASE  sb=$STUDENT_BASE  skip_random=$SKIP_RANDOM  tag=$OUT_TAG"
+
+# Build extra flag
+SKIP_FLAG=""
+if [ "$SKIP_RANDOM" = "1" ]; then SKIP_FLAG="--skip_random"; fi
 
 # Loop over each K value in K_LIST
 for K in $(echo "$K_LIST" | tr ',' ' '); do
@@ -75,7 +80,8 @@ for K in $(echo "$K_LIST" | tr ',' ' '); do
         --te "$TE" --se "$SE" \
         --teacher_base "$TEACHER_BASE" \
         --student_base "$STUDENT_BASE" \
-        --out_tag "$SUB_TAG"
+        --out_tag "$SUB_TAG" \
+        $SKIP_FLAG
 done
 
 echo

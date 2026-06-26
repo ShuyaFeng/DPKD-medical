@@ -137,6 +137,8 @@ def main():
     ap.add_argument("--teacher_base", type=int, default=32)
     ap.add_argument("--student_base", type=int, default=0)
     ap.add_argument("--out_tag", type=str, default="")
+    ap.add_argument("--skip_random", action="store_true",
+                    help="skip the random_subsample control to save compute")
     args = ap.parse_args()
     if args.student_base == 0:
         args.student_base = max(8, args.teacher_base // 2)
@@ -216,10 +218,12 @@ def main():
     results["series"]["PATE+uniform_all"] = {}
     for kf in KFS:
         results["series"][f"PATE+subsample_honest_keep{int(kf*100)}%"] = {}
-        results["series"][f"PATE+subsample_random_keep{int(kf*100)}%"] = {}
+        if not args.skip_random:
+            results["series"][f"PATE+subsample_random_keep{int(kf*100)}%"] = {}
 
     # ---- main sweep ----
-    total = len(EPS) * (1 + 2 * len(KFS))
+    cells_per_eps = 1 + (2 if not args.skip_random else 1) * len(KFS)
+    total = len(EPS) * cells_per_eps
     done = 0
     job_t0 = time.time()
     mask_all = torch.ones(Cb, dtype=torch.bool, device=device)
@@ -266,21 +270,21 @@ def main():
             print(f"   [progress] {done}/{total}  elapsed={elapsed/60:.1f}min  ETA={eta/60:.1f}min")
             save_path.write_text(json.dumps(results, indent=2))
 
-            # 3) subsample_random control: random keep% + uniform on kept,
-            #    full rho_total for noise (no importance used).
-            mask_r, _ = random_mask(Cb, kf, device, seed=12345 + int(eps * 10))
-            sigma_r = thresholded_uniform_sigma(deltas, rho_total, mask_r)
-            sigma_kept_r = float(sigma_r[mask_r].mean())
-            print(f"   [random keep{int(kf*100)}%]   K_kept={K_kept}/{Cb}  "
-                  f"sigma_kept={sigma_kept_r:.4f}")
-            results["series"][f"PATE+subsample_random_keep{int(kf*100)}%"][str(eps)] = run_cell(
-                sigma_r, mask_r, f"random_keep{int(kf*100)}%", eps, seed_offset=2,
-            )
-            done += 1
-            elapsed = time.time() - job_t0
-            eta = elapsed / done * (total - done)
-            print(f"   [progress] {done}/{total}  elapsed={elapsed/60:.1f}min  ETA={eta/60:.1f}min")
-            save_path.write_text(json.dumps(results, indent=2))
+            # 3) subsample_random control (skip if --skip_random)
+            if not args.skip_random:
+                mask_r, _ = random_mask(Cb, kf, device, seed=12345 + int(eps * 10))
+                sigma_r = thresholded_uniform_sigma(deltas, rho_total, mask_r)
+                sigma_kept_r = float(sigma_r[mask_r].mean())
+                print(f"   [random keep{int(kf*100)}%]   K_kept={K_kept}/{Cb}  "
+                      f"sigma_kept={sigma_kept_r:.4f}")
+                results["series"][f"PATE+subsample_random_keep{int(kf*100)}%"][str(eps)] = run_cell(
+                    sigma_r, mask_r, f"random_keep{int(kf*100)}%", eps, seed_offset=2,
+                )
+                done += 1
+                elapsed = time.time() - job_t0
+                eta = elapsed / done * (total - done)
+                print(f"   [progress] {done}/{total}  elapsed={elapsed/60:.1f}min  ETA={eta/60:.1f}min")
+                save_path.write_text(json.dumps(results, indent=2))
 
     # ---- summary ----
     print("\n" + "=" * 92)
