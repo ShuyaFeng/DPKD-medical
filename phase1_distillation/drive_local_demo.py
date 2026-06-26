@@ -250,6 +250,33 @@ def collect_caps(model, loader, device, q: float = 0.9):
     return torch.quantile(torch.stack(norms), q, dim=0)
 
 
+@torch.no_grad()
+def collect_caps_clipped(model, loader, device, clip):
+    """Per-channel cap as a clipped mean of per-image per-channel L2 norms.
+
+    For each image we form the per-channel norm vector v (v[c] = ||e3[c]||_2)
+    and clip it to L2 norm <= `clip` (a fixed, data-independent bound on the
+    bottleneck's per-image Frobenius norm), then average over images. The
+    resulting cap vector has replace-one L2 sensitivity 2*clip/N, so it can be
+    released under a Gaussian mechanism (see add_dp_noise_to_caps). Unlike the
+    quantile in collect_caps, this is the DP-honest estimator: `clip` must be
+    chosen WITHOUT looking at the observed activation scale (e.g. from a public
+    or proxy model), since the activations depend on the private teacher.
+    """
+    model.eval()
+    Cb = model.base * 4
+    norm_sum = torch.zeros(Cb, device=device)
+    n = 0
+    for x, _ in loader:
+        x = x.to(device)
+        _, _, e3 = model.encode(x)                       # (B, C, H, W)
+        v = e3.flatten(2).norm(dim=2)                    # (B, C) per-channel L2 norm
+        v = v * (clip / v.norm(dim=1, keepdim=True).clamp_min(1e-12)).clamp_max(1.0)
+        norm_sum += v.sum(dim=0)
+        n += v.shape[0]
+    return norm_sum / n
+
+
 # -------------------------------------------------------------------------
 # Noise probe — the 3-way comparison
 # -------------------------------------------------------------------------

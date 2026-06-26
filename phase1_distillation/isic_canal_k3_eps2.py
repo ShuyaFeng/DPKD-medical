@@ -19,9 +19,20 @@ from drive_pate_poc import train_K_teachers
 from drive_pate_pruning_joint import shared_importance, thresholded_uniform_sigma, precompute_joint_cache
 from drive_pate_canal_combined import (
     correct_waterfilling_sigma, correct_waterfilling_sigma_honest,
+    add_dp_noise_to_caps,
 )
+from drive_local_demo import collect_caps_clipped
 
 ALPHA_IMP = 0.1
+# --- Honest clipping caps (OFF by default) -------------------------------
+# Set HONEST_CAPS=True to also pay DP for the per-channel clipping caps via a
+# three-way budget split rho = rho_caps + rho_imp + rho_rel. CLIP_CAPS is a
+# fixed, DATA-INDEPENDENT bound on the per-image bottleneck Frobenius norm and
+# MUST NOT be tuned to observed activations (estimate it from a public/proxy
+# model). The default is a placeholder; verify before trusting honest-caps runs.
+HONEST_CAPS = False
+ALPHA_CAPS = 0.1
+CLIP_CAPS = 10.0
 from drive_student_distill import train_student_distill
 from synthetic_demo import eps_to_rho
 
@@ -72,13 +83,21 @@ def main():
     imp = {K: shared_importance(tk[K][0], DataLoader(train_ds, batch_size=8), dev).to(dev)
            for K in K_VALUES}
 
+    # raw (pre-noise) clipped-mean caps for the honest DP release; only built
+    # when HONEST_CAPS is on (otherwise the un-noised quantile caps are used).
+    raw_caps = None
+    if HONEST_CAPS:
+        _cl = DataLoader(train_ds, batch_size=8)
+        raw_caps = {K: [collect_caps_clipped(t, _cl, dev, CLIP_CAPS) for t in tk[K][0]]
+                    for K in K_VALUES}
+
     def students(cache):
         return [train_student_distill(train_ds, val_loader, cache, dev, student_base=16,
                                       teacher_base=32, n_epochs=args.se, lr=1e-3,
                                       lambda_feat=0.4, seed=s, in_ch=in_ch)[0] for s in SEEDS]
 
-    def cell(K, am, sigma):
-        cache = precompute_joint_cache(tk[K][0], tk[K][1], train_ds, sigma, am, dev, seed=42)
+    def cell(K, am, sigma, caps_list):
+        cache = precompute_joint_cache(tk[K][0], caps_list, train_ds, sigma, am, dev, seed=42)
         d = students(cache)
         return {"dices": d, "mean": float(np.mean(d)), "sem": float(np.std(d) / np.sqrt(len(d)))}
 
@@ -88,16 +107,27 @@ def main():
         for e in EPS:
             rho = eps_to_rho(e)
             am = torch.ones(Cb, dtype=torch.bool, device=dev)
+            if HONEST_CAPS:
+                # three-way split: rho = rho_caps + (rho_imp + rho_rel)
+                rho_caps = ALPHA_CAPS * rho
+                rho_rest = (1.0 - ALPHA_CAPS) * rho
+                sens_caps = 2.0 * CLIP_CAPS / float(len(train_ds))
+                caps_list = [add_dp_noise_to_caps(c, sens_caps, rho_caps,
+                                                  seed=int(e * 10) + 100 + i)
+                             for i, c in enumerate(raw_caps[K])]
+            else:
+                rho_rest = rho
+                caps_list = tk[K][1]
             if canal:
                 sens_imp = 2.0 / float(len(train_ds))  # unit-norm per-sample clip => sensitivity 2/N
                 sigma = correct_waterfilling_sigma_honest(
-                    deltas, imp[K], rho,
+                    deltas, imp[K], rho_rest,
                     sensitivity=sens_imp, alpha=ALPHA_IMP,
                     noise_seed=int(e * 10) + 1,
                 )
             else:
-                sigma = thresholded_uniform_sigma(deltas, rho, am)
-            out[f"{e}"] = cell(K, am, sigma)
+                sigma = thresholded_uniform_sigma(deltas, rho_rest, am)
+            out[f"{e}"] = cell(K, am, sigma, caps_list)
             print(f"   {args.dataset} K={K} canal={canal} ε={e}: {out[f'{e}']['mean']:.4f}")
         return out
 
