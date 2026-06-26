@@ -83,8 +83,11 @@ def precompute_cache(teacher, train_ds, caps, sigma, device, seed: int):
 
 def train_student_distill(train_ds, val_loader, cache, device,
                           student_base=16, teacher_base=32,
-                          n_epochs=40, lr=1e-3, lambda_feat=0.4, seed=2, in_ch=3):
-    """Train student from scratch on (cached noisy features + GT labels). in_ch=4 for BraTS."""
+                          n_epochs=40, lr=1e-3, lambda_feat=0.4, seed=2, in_ch=3,
+                          gt_weight=1.0):
+    """Train student from scratch on (cached noisy features + GT labels). in_ch=4 for BraTS.
+    gt_weight=0 drops the GT task loss (fully-private feature distillation) — note the
+    student decoder then gets NO supervision (only the encoder is shaped by feat loss)."""
     torch.manual_seed(seed)
     student = TinyUNet(in_ch=in_ch, num_classes=2, base=student_base).to(device)
     adapter = Adapter(student_base * 4, teacher_base * 4).to(device)
@@ -116,7 +119,7 @@ def train_student_distill(train_ds, val_loader, cache, device,
             f_loss = F.mse_loss(s_proj, t_targets)
             logits = student.decode(e1, e2, e3)
             t_loss = task_loss(logits, ys)
-            loss = t_loss + lambda_feat * f_loss
+            loss = gt_weight * t_loss + lambda_feat * f_loss
             loss.backward()
             opt.step()
             tot_task += t_loss.item(); tot_feat += f_loss.item()
