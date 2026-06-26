@@ -120,8 +120,14 @@ def main():
     ap.add_argument("--te", type=int, default=50)
     ap.add_argument("--se", type=int, default=40)
     ap.add_argument("--size", type=int, default=96)
+    ap.add_argument("--teacher_base", type=int, default=32,
+                    help="teacher TinyUNet base width (bottleneck C = 4 * teacher_base)")
+    ap.add_argument("--student_base", type=int, default=0,
+                    help="student TinyUNet base width (0 = teacher_base // 2)")
     ap.add_argument("--out_tag", type=str, default="")
     args = ap.parse_args()
+    if args.student_base == 0:
+        args.student_base = max(8, args.teacher_base // 2)
 
     device = ("cuda" if torch.cuda.is_available()
               else "mps" if torch.backends.mps.is_available() else "cpu")
@@ -139,8 +145,10 @@ def main():
     t0 = time.time()
     teachers, caps_list = train_K_teachers(
         train_ds, K=args.K, device=device, n_epochs=args.te, in_ch=3,
+        base=args.teacher_base,
     )
-    print(f"  K={args.K} done in {time.time()-t0:.0f}s")
+    print(f"  K={args.K} done in {time.time()-t0:.0f}s "
+          f"(teacher_base={args.teacher_base}, bottleneck C={args.teacher_base*4})")
 
     # ---- raw importance (unclipped, used by raw CANAL = current behavior) ----
     imp_loader = DataLoader(train_ds, batch_size=8, shuffle=False)
@@ -192,7 +200,7 @@ def main():
             t0 = time.time()
             best, _ = train_student_distill(
                 train_ds, val_loader, cache, device,
-                student_base=16, teacher_base=32,
+                student_base=args.student_base, teacher_base=args.teacher_base,
                 n_epochs=args.se, lr=1e-3, lambda_feat=0.4,
                 seed=s, in_ch=3,
             )

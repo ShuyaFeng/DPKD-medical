@@ -47,11 +47,13 @@ SEEDS=${SEEDS:-5}
 EPS=${EPS:-0.1,0.5,1,2,4,6,8}
 ALPHA_IMP=${ALPHA_IMP:-0.1}
 CLIP_IMP=${CLIP_IMP:-100.0}
+TEACHER_BASE=${TEACHER_BASE:-32}
+STUDENT_BASE=${STUDENT_BASE:-0}
 OUT_TAG=${OUT_TAG:-}
 TE=${TE:-50}
 SE=${SE:-40}
 
-echo "[honest CANAL] K=$K seeds=$SEEDS eps=$EPS alpha=$ALPHA_IMP clip=$CLIP_IMP tag=$OUT_TAG"
+echo "[honest CANAL] K=$K seeds=$SEEDS eps=$EPS alpha=$ALPHA_IMP clip=$CLIP_IMP teacher_base=$TEACHER_BASE student_base=$STUDENT_BASE tag=$OUT_TAG"
 
 python3 isic_honest_canal_compare.py \
     --K "$K" \
@@ -59,6 +61,8 @@ python3 isic_honest_canal_compare.py \
     --epsilons "$EPS" \
     --alpha_imp "$ALPHA_IMP" \
     --clip_imp "$CLIP_IMP" \
+    --teacher_base "$TEACHER_BASE" \
+    --student_base "$STUDENT_BASE" \
     --te "$TE" --se "$SE" \
     --out_tag "$OUT_TAG"
 
