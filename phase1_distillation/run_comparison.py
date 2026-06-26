@@ -29,7 +29,14 @@ sys.path.insert(0, str(Path(__file__).parent))
 from drive_local_demo import TinyUNet, train_teacher, evaluate_vessel_dice
 from drive_pate_poc import train_K_teachers
 from drive_pate_pruning_joint import shared_importance, thresholded_uniform_sigma, precompute_joint_cache
-from drive_pate_canal_combined import correct_waterfilling_sigma
+from drive_pate_canal_combined import (
+    correct_waterfilling_sigma, correct_waterfilling_sigma_honest,
+)
+
+# Honest CANAL accounting: charge rho_imp = ALPHA_IMP * rho for releasing the
+# (data-dependent) importance vector. See `correct_waterfilling_sigma_honest`.
+ALPHA_IMP = 0.1
+CLIP_IMP = 100.0   # per-sample L2 cap on the per-channel importance contribution
 from drive_student_distill import train_student_distill
 from synthetic_demo import eps_to_rho
 
@@ -132,7 +139,12 @@ def main():
             rho = eps_to_rho(e)
             if canal:
                 am = torch.ones(Cb, dtype=torch.bool, device=dev)
-                sigma = correct_waterfilling_sigma(deltas, imp[K], rho)
+                sens_imp = 2.0 * CLIP_IMP / float(len(train_ds))
+                sigma = correct_waterfilling_sigma_honest(
+                    deltas, imp[K], rho,
+                    sensitivity=sens_imp, alpha=ALPHA_IMP,
+                    noise_seed=int(e * 10) + 1,
+                )
             else:
                 am = rand_mask(frac, rand_seed) if random_select else importance_mask(K, frac)
                 sigma = thresholded_uniform_sigma(deltas, rho, am)

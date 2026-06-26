@@ -37,10 +37,65 @@ from drive_pate_poc import (
 
 
 def correct_waterfilling_sigma(deltas, importance, rho):
-    """WF sigma with the correct factor-of-2 in zCDP."""
+    """WF sigma with the correct factor-of-2 in zCDP.
+
+    NOTE: This function alone is NOT honest DP — the importance vector was
+    computed from the private dataset and releasing sigma_c reveals s_c.
+    See ``correct_waterfilling_sigma_honest`` below for proper accounting that
+    charges rho_imp for the importance release.
+    """
     s = importance.clamp(min=1e-12)
     kappa = ((deltas * s.sqrt()).sum() / (2.0 * rho)).sqrt()
     return kappa * deltas.sqrt() / s.pow(0.25)
+
+
+def add_dp_noise_to_importance(importance, sensitivity, rho_imp, seed=42):
+    """Gaussian mechanism on the importance vector.
+
+    sigma_imp = sensitivity / sqrt(2 * rho_imp). Clamped at small positive to
+    keep s^{1/4} well-defined downstream.
+
+    Args:
+      importance: per-channel importance tensor [C].
+      sensitivity: replace-one L2 sensitivity of `importance` (typically
+        2 * clip / N where `clip` is the per-sample L2 cap on the per-channel
+        contribution and `N` is the number of training records).
+      rho_imp: zCDP budget allocated to releasing importance.
+      seed: integer for reproducible Gaussian noise.
+    """
+    import math
+    sigma_imp = sensitivity / math.sqrt(2.0 * rho_imp)
+    g = torch.Generator()
+    g.manual_seed(int(seed))
+    noise = torch.randn(importance.shape, generator=g) * sigma_imp
+    return (importance.detach().cpu() + noise).clamp(min=1e-6).to(importance.device)
+
+
+def correct_waterfilling_sigma_honest(
+    deltas, importance, rho,
+    sensitivity, alpha=0.1, noise_seed=42,
+):
+    """Honest WF: budget-split rho into rho_imp + rho_rel, add Gaussian noise
+    to importance with rho_imp before computing WF with rho_rel.
+
+    Total zCDP cost is exactly `rho` (matches the uniform mechanism at the same
+    epsilon), so this is the apples-to-apples comparison to uniform.
+
+    Args:
+      deltas:    per-channel sensitivity [C] of the bottleneck release.
+      importance: per-channel raw importance [C] (clipped per-sample upstream).
+      rho:       total zCDP budget for the CANAL release.
+      sensitivity: L2 sensitivity of `importance` (replace-one). Compute from
+        the upstream clipping bound, e.g. 2 * clip / N.
+      alpha:     fraction of rho spent on releasing importance (default 0.1).
+      noise_seed: seed for reproducible Gaussian noise on importance.
+    """
+    rho_imp = alpha * rho
+    rho_rel = (1.0 - alpha) * rho
+    imp_noisy = add_dp_noise_to_importance(
+        importance, sensitivity, rho_imp, seed=noise_seed,
+    )
+    return correct_waterfilling_sigma(deltas, imp_noisy, rho_rel)
 
 
 def compute_teacher_importance(teacher, subset_indices, train_ds, device):
