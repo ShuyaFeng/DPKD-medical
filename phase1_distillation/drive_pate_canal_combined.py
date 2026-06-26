@@ -83,10 +83,12 @@ def correct_waterfilling_sigma_honest(
 
     Args:
       deltas:    per-channel sensitivity [C] of the bottleneck release.
-      importance: per-channel raw importance [C] (clipped per-sample upstream).
+      importance: per-channel importance [C], L2-normalised per sample in
+        compute_importance (unit norm), so its replace-one L2 sensitivity is
+        2 / N with no data-dependent clip.
       rho:       total zCDP budget for the CANAL release.
-      sensitivity: L2 sensitivity of `importance` (replace-one). Compute from
-        the upstream clipping bound, e.g. 2 * clip / N.
+      sensitivity: L2 sensitivity of `importance` (replace-one), i.e. 2 / N
+        for the unit-norm per-sample normalisation above.
       alpha:     fraction of rho spent on releasing importance (default 0.1).
       noise_seed: seed for reproducible Gaussian noise on importance.
     """

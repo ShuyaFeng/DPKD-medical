@@ -28,7 +28,6 @@ from drive_pate_canal_combined import (
 )
 
 ALPHA_IMP = 0.1
-CLIP_IMP = 100.0
 from drive_student_distill import train_student_distill
 from synthetic_demo import eps_to_rho
 
@@ -94,7 +93,7 @@ def main():
             rho = eps_to_rho(e)
             am = torch.ones(Cb, dtype=torch.bool, device=dev)
             if canal:
-                sens_imp = 2.0 * CLIP_IMP / float(len(train_ds))
+                sens_imp = 2.0 / float(len(train_ds))  # unit-norm per-sample clip => sensitivity 2/N
                 sigma = correct_waterfilling_sigma_honest(
                     deltas, imp[K], rho,
                     sensitivity=sens_imp, alpha=ALPHA_IMP,

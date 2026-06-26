@@ -20,29 +20,9 @@ from drive_pate_canal_combined import (
     correct_waterfilling_sigma, correct_waterfilling_sigma_honest,
 )
 
-# NOTE on CLIP_IMP: this is a provisional value, not a derived bound.
-# We measured the real importance values produced on BUSI (K=3, full
-# 60-epoch teachers, matching the real experiment):
-#
-#   train_ds = BUSIDataset("train", 96)
-#   tk = train_K_teachers(train_ds, 3, dev, n_epochs=60, in_ch=1)
-#   imp = shared_importance(tk[0], DataLoader(train_ds, batch_size=8), dev)
-#   print(imp.min(), imp.max(), imp.mean())
-#   -> min=1.9e-9  max=3.4e-8  mean=9.3e-9
-#
-# CLIP_IMP=1e-8 was chosen because it's the same order of magnitude as
-# these measured values, so the noise added to importance stays
-# comparable to the real signal rather than overwhelming it. This is an
-# empirical calibration based on observed output, not a derived
-# per-sample sensitivity bound -- confirming the formally correct value
-# (and whether explicit clipping should be added inside
-# compute_importance() itself) is still open.
-#
-# Confirmed: with this value, CANAL beats uniform at every epsilon on
-# BUSI (see results/busi_canal_k3_eps2_results.json). Not yet checked
-# on Kvasir/ISIC, whose importance scale may differ.
+# Importance is L2-normalised per sample inside compute_importance (unit
+# norm), so its replace-one sensitivity is 2/N with no data-dependent clip.
 ALPHA_IMP = 0.1
-CLIP_IMP = 1e-8
 from drive_student_distill import train_student_distill
 from synthetic_demo import eps_to_rho
 
@@ -110,7 +90,7 @@ def main():
             rho = eps_to_rho(e)
             am = torch.ones(Cb, dtype=torch.bool, device=dev)
             if canal:
-                sens_imp = 2.0 * CLIP_IMP / float(len(train_ds))
+                sens_imp = 2.0 / float(len(train_ds))  # unit-norm per-sample clip => sensitivity 2/N
                 sigma = correct_waterfilling_sigma_honest(
                     deltas, imp[K], rho,
                     sensitivity=sens_imp, alpha=ALPHA_IMP,
