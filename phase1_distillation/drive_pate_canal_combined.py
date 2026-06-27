@@ -71,28 +71,6 @@ def add_dp_noise_to_importance(importance, sensitivity, rho_imp, seed=42):
     return (importance.detach().cpu() + noise).clamp(min=1e-6).to(importance.device)
 
 
-def add_dp_noise_to_caps(caps, sensitivity, rho_caps, seed=42):
-    """Gaussian mechanism on a per-channel clipping-cap vector.
-
-    sigma_caps = sensitivity / sqrt(2 * rho_caps). Floored at a small positive
-    value so the downstream clip+normalise stays well-defined.
-
-    Args:
-      caps: per-channel cap tensor [C] from collect_caps_clipped (clipped mean
-        of per-image per-channel L2 norms).
-      sensitivity: replace-one L2 sensitivity of `caps`, i.e. 2 * clip / N for
-        the per-image L2 clip used in collect_caps_clipped.
-      rho_caps: zCDP budget allocated to releasing the caps.
-      seed: integer for reproducible Gaussian noise.
-    """
-    import math
-    sigma_caps = sensitivity / math.sqrt(2.0 * rho_caps)
-    g = torch.Generator()
-    g.manual_seed(int(seed))
-    noise = torch.randn(caps.shape, generator=g) * sigma_caps
-    return (caps.detach().cpu() + noise).clamp(min=1e-6).to(caps.device)
-
-
 def correct_waterfilling_sigma_honest(
     deltas, importance, rho,
     sensitivity, alpha=0.1, noise_seed=42,
@@ -105,12 +83,10 @@ def correct_waterfilling_sigma_honest(
 
     Args:
       deltas:    per-channel sensitivity [C] of the bottleneck release.
-      importance: per-channel importance [C], L2-normalised per sample in
-        compute_importance (unit norm), so its replace-one L2 sensitivity is
-        2 / N with no data-dependent clip.
+      importance: per-channel raw importance [C] (clipped per-sample upstream).
       rho:       total zCDP budget for the CANAL release.
-      sensitivity: L2 sensitivity of `importance` (replace-one), i.e. 2 / N
-        for the unit-norm per-sample normalisation above.
+      sensitivity: L2 sensitivity of `importance` (replace-one). Compute from
+        the upstream clipping bound, e.g. 2 * clip / N.
       alpha:     fraction of rho spent on releasing importance (default 0.1).
       noise_seed: seed for reproducible Gaussian noise on importance.
     """

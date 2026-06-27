@@ -36,6 +36,7 @@ from drive_pate_canal_combined import (
 # Honest CANAL accounting: charge rho_imp = ALPHA_IMP * rho for releasing the
 # (data-dependent) importance vector. See `correct_waterfilling_sigma_honest`.
 ALPHA_IMP = 0.1
+CLIP_IMP = 100.0   # per-sample L2 cap on the per-channel importance contribution
 from drive_student_distill import train_student_distill
 from synthetic_demo import eps_to_rho
 
@@ -138,7 +139,7 @@ def main():
             rho = eps_to_rho(e)
             if canal:
                 am = torch.ones(Cb, dtype=torch.bool, device=dev)
-                sens_imp = 2.0 / float(len(train_ds))  # unit-norm per-sample clip => sensitivity 2/N
+                sens_imp = 2.0 * CLIP_IMP / float(len(train_ds))
                 sigma = correct_waterfilling_sigma_honest(
                     deltas, imp[K], rho,
                     sensitivity=sens_imp, alpha=ALPHA_IMP,
