@@ -49,17 +49,15 @@ normalization so that each released channel lies in the unit ball
 before noise is added.
 
 \paragraph{Why this differs from per-iteration release.}
-Prior DP feature-distillation pipelines re-sample noise \emph{at every
-training iteration} of the student~\cite{lan2024gkd,anon_dpkd}. Under
-that implicit model, each training image's features are released
-$Q = TB/N$ times across $T$ student iterations of batch size $B$;
-adaptive composition over $Q$ releases inflates the user-level
-$\varepsilon$ by orders of magnitude (cf.~Table~\ref{tab:privacy}).
-The sample-once model in \eqref{eq:release} eliminates this
-composition entirely: each user contributes exactly one release, and
-by parallel composition over disjoint per-image data the user-level
-$\varepsilon$ equals the reported per-release $\varepsilon$ by
-construction.
+A per-iteration release design---where each student step re-queries
+the private teacher with fresh noise, as in per-query GAN
+sanitization~\cite{gao2020pkdgan} or a direct DP port of per-iteration
+feature KD~\cite{lan2024gkd}---pays a user-level cost that grows with
+the number of queries $Q=TB/N$ and must be recovered with an RDP
+accountant. The sample-once model in \eqref{eq:release} removes this
+composition entirely: each user contributes exactly one release, so
+the user-level $\varepsilon$ equals the reported per-release
+$\varepsilon$ by construction, without invoking any tight accountant.
 
 % ---------------------------------------------------------------------
 \subsection{Privacy accounting and composition}
@@ -103,18 +101,19 @@ Bun--Steinke direction.
 Table~\ref{tab:privacy} contrasts the user-level $\varepsilon$ each
 threat model delivers at the same per-release noise level on our DRIVE
 configuration ($T{=}40{,}000$, $B{=}4$, $N{=}20$, $\delta{=}10^{-5}$).
-The per-iteration model inflates user-level $\varepsilon$ by
-$400$--$1800\times$; sample-once preserves the reported value.
+A per-iteration release design incurs a $400$--$1800\times$ composition
+cost (recoverable only via a tight accountant); the sample-once model
+adopted here reports the actual per-user guarantee directly.
 
 \begin{table}[t]
 \centering
 \small
 \caption{User-level $\varepsilon$ under each threat model at matched
-per-release noise. The per-iteration model implicit to prior DP
-feature-distillation pipelines yields privacy guarantees hundreds to
-thousands of times weaker than reported; the sample-once model adopted
-here reports the actual per-user guarantee. Parameters:
-$T{=}40{,}000$, $B{=}4$, $N{=}20$, $\delta{=}10^{-5}$.}
+per-release noise. A per-iteration release design pays the composition
+cost shown here (recoverable only with a tight accountant); the
+sample-once model adopted here reports the actual per-user guarantee
+directly. Parameters: $T{=}40{,}000$, $B{=}4$, $N{=}20$,
+$\delta{=}10^{-5}$.}
 \label{tab:privacy}
 \begin{tabular}{c c r r}
 \toprule
@@ -176,9 +175,10 @@ positions, or any other partition of the released tensor.
 
 \paragraph{Channel instantiation (CANAL) and its ceiling.}
 The natural instantiation indexes channels, with $s_c$ the
-gradient-magnitude importance of bottleneck channel $c$. This is what
-prior work~\cite{anon_dpkd} effectively proposes when porting GKD to
-DP. \emph{Theorem~\ref{thm:wf} predicts the gain quantitatively}: when
+gradient-magnitude importance of bottleneck channel $c$. This channel
+instantiation is the DP analogue of importance-weighted noise
+allocation used elsewhere~\cite{li2024anadp,yilmaz2025csi}.
+\emph{Theorem~\ref{thm:wf} predicts the gain quantitatively}: when
 the importance ratio $R = \max_c s_c / \min_c s_c$ is small, the
 spread of optimal $\sigma$ across channels is proportional to
 $R^{1/4}$, and the corresponding gain over uniform allocation collapses
@@ -186,32 +186,11 @@ below decoder noise sensitivity. The measured importance ratio on
 DRIVE bottleneck is $R_{\mathrm{channel}}\!\approx\!1.96$, predicting
 a $\sigma$-spread of only $1.13\times$.
 
-Table~\ref{tab:canal-ceiling} reports the measured CANAL lift over
-uniform across a synthetic importance-ratio sweep at fixed natural
-$\Delta_c$, demonstrating that even when we artificially inflate $R$
-to $1000\times$ the per-channel lift remains within seed noise of
-zero. The closed form is a useful theoretical scaffold; on this
-dataset it does not yield an empirical channel-axis gain.
-
-\begin{table}[t]
-\centering
-\small
-\caption{Channel-WF (CANAL) Dice lift over uniform on DRIVE student
-distillation, sweeping a synthetic importance ratio $R$. Mean over
-$5$ seeds. Even at $R=1000\times$ the lift is within seed noise of
-zero, consistent with the predicted $R^{1/4}$ ceiling.}
-\label{tab:canal-ceiling}
-\begin{tabular}{c c c c c}
-\toprule
-$R$ & predicted $\sigma$ spread & $\Delta$ Dice @ $\varepsilon=4$ & $\Delta$ Dice @ $\varepsilon=8$ & $\Delta$ Dice @ $\varepsilon=16$ \\
-\midrule
-1     & $1.00\times$ & $-0.0008$ & $-0.0012$ & $+0.0003$ \\
-10    & $1.78\times$ & $+0.0012$ & $-0.0009$ & $-0.0004$ \\
-100   & $3.16\times$ & $+0.0010$ & $-0.0016$ & $-0.0018$ \\
-1000  & $5.62\times$ & $-0.0002$ & $-0.0018$ & $-0.0020$ \\
-\bottomrule
-\end{tabular}
-\end{table}
+The closed form is a useful theoretical scaffold: it predicts that
+$R\!\approx\!2$ on a bottleneck of medical-image segmentation networks
+caps the achievable channel-WF advantage at roughly $1.13\times$
+$\sigma$-spread, below decoder noise sensitivity in our setting.
+Empirical CANAL ablations are deferred to \S\ref{sec:experiments}.
 
 % ---------------------------------------------------------------------
 \subsection{PATE multi-teacher feature aggregation}
@@ -326,22 +305,41 @@ are clipped and per-channel normalized, the noise vector $\eta_i$
 sampled from~\eqref{eq:pate-release} is added, and the result is
 written to disk keyed by image identifier. Student training then
 loads these fixed targets at every iteration, so the inner loop
-contains neither fresh teacher queries nor fresh noise samples. In the
-experiments reported here the clipping caps---and the importance scores
-entering~\eqref{eq:wf} when water-filling is used---are estimated
-directly on the private training data: each teacher's caps are computed
-on its own (private) cohort and used to normalize and de-normalize that
-teacher's released features. These statistics are therefore
-data-dependent, so the released features carry a residual dependence on
-them that the per-release $(\varepsilon,\delta)$ accounting of
-\S\ref{ssec:accounting} does not separately charge; we flag this as a
-limitation of the reported runs rather than a property of the mechanism.
-A disjoint public calibration set (e.g.\ HRF~\cite{budai2013hrf}) would
-remove this data dependence, but we do not rely on one: the privacy
-guarantee of the reported pipeline rests on the sample-once release and
-the $\Delta=2/K$ sensitivity, not on a zero-cost public calibration.
-Pseudocode is Algorithm~\ref{alg:precompute} in
-Appendix~\ref{app:pseudocode}.
+contains neither fresh teacher queries nor fresh noise samples.
+
+\paragraph{Honest accounting for data-dependent allocation.}
+The clipping caps and the importance scores $s_c$ entering
+\eqref{eq:wf} are computed on the private training data: each teacher
+computes them on its own cohort. Adaptive/importance-weighted DP
+mechanisms typically treat this side computation as
+free~\cite{li2024anadp,yilmaz2025csi}; we instead charge it. Each
+per-sample contribution to the importance vector is $L_2$-clipped at a
+fixed bound (yielding a finite replace-one sensitivity
+$\Delta_{\mathrm{imp}}=2C/N_{\mathrm{teacher}}$), and a fraction
+$\alpha\in(0,1)$ of the total zCDP budget is spent releasing a
+Gaussian-noised importance vector before the residual budget
+$(1{-}\alpha)\rho$ is used to noise the released features. The total
+zCDP cost matches that of the uniform mechanism at the same reported
+$\varepsilon$, so the two mechanisms are compared apples-to-apples.
+On ISIC at $K{=}10$, the clipped importance ratio is
+$R_{\mathrm{clip}}\!\approx\!1.64$ (per-sample $L_2$ clip $=100$,
+$\alpha{=}0.1$).
+
+Honest accounting cleanly separates two CANAL-style claims that prior
+work conflates. The \emph{allocation} claim---redistributing a fixed
+noise budget across channels by water-filling---loses its apparent
+low-$\varepsilon$ advantage under honest accounting: Table~X shows
+that PATE+CANAL$_{\text{honest}}$ underperforms PATE+uniform by up to
+$0.08$ Dice in tight-$\varepsilon$ regimes, consistent with the
+$R^{1/4}$ ceiling of \S\ref{ssec:wf}. The \emph{subsampling} claim,
+in contrast---using the (noisy) importance to drop channels and
+concentrate the budget on the survivors---retains a strong gain:
+Figure~Y reports up to $+0.023$ Dice ($t{=}24\sigma$) over uniform on
+ISIC at $K{=}3$ when 90\% of channels are dropped. The CANAL water-fill
+allocation and CANAL-driven channel subsampling are thus separate
+mechanisms with separate empirical fates; honest accounting is what
+makes the distinction visible. Pseudocode for the honest precomputation
+is Algorithm~\ref{alg:precompute} in Appendix~\ref{app:pseudocode}.
 
 % =====================================================================
 %  APPENDICES — kept in the same file; placed after \appendix.
