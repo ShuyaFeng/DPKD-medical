@@ -32,3 +32,5 @@ Thumbs.db
 
 # Claude Code local settings
 .claude/
+phase1_distillation/checkpoints/
+phase1_distillation/checkpoints/

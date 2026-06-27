@@ -81,10 +81,12 @@ def precompute_cache(teacher, train_ds, caps, sigma, device, seed: int):
     return cache
 
 
+import copy
+
 def train_student_distill(train_ds, val_loader, cache, device,
                           student_base=16, teacher_base=32,
-                          n_epochs=40, lr=1e-3, lambda_feat=0.4, seed=2, in_ch=3):
-    """Train student from scratch on (cached noisy features + GT labels). in_ch=4 for BraTS."""
+                          n_epochs=40, lr=1e-3, lambda_feat=0.4, seed=2, in_ch=3,
+                          save_path=None):
     torch.manual_seed(seed)
     student = TinyUNet(in_ch=in_ch, num_classes=2, base=student_base).to(device)
     adapter = Adapter(student_base * 4, teacher_base * 4).to(device)
@@ -97,6 +99,7 @@ def train_student_distill(train_ds, val_loader, cache, device,
     best_dice = 0.0
     best_metrics = {"vessel_dice": 0.0, "mdice": 0.0, "miou": 0.0, "pixel_acc": 0.0}
     best_ep = 0
+    best_state = None          # <-- NEW: holds the best epoch's weights
     history = []
 
     for ep in range(n_epochs):
@@ -128,6 +131,7 @@ def train_student_distill(train_ds, val_loader, cache, device,
             best_dice = val_dice
             best_metrics = metrics
             best_ep = ep + 1
+            best_state = copy.deepcopy(student.state_dict())   # <-- NEW: snapshot weights NOW, while they're the best
         history.append({"ep": ep + 1, "task": tot_task / n_batches,
                         "feat": tot_feat / n_batches, "val_dice": val_dice})
 
@@ -136,9 +140,17 @@ def train_student_distill(train_ds, val_loader, cache, device,
                   f"feat={tot_feat/n_batches:.4f}  val={val_dice:.4f}  "
                   f"best_so_far={best_dice:.4f} (ep {best_ep})")
 
-    # Returns (best_vessel_dice, best_metrics_dict). Existing callers that do
-    # `best, _ = train_student_distill(...)` keep working — the second value
-    # is now the metrics dict instead of history (both were ignored anyway).
+    # NEW: optionally save the best checkpoint to disk
+    if save_path is not None and best_state is not None:
+        torch.save({
+            "state_dict": best_state,
+            "in_ch": in_ch,
+            "student_base": student_base,
+            "best_dice": best_dice,
+            "best_epoch": best_ep,
+        }, save_path)
+        print(f"    saved checkpoint -> {save_path}")
+
     return best_dice, best_metrics
 
 

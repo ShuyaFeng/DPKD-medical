@@ -22,12 +22,15 @@ from drive_pate_canal_combined import (
 )
 
 ALPHA_IMP = 0.1
-CLIP_IMP = 100.0
+CLIP_IMP = 1e-8
 from drive_student_distill import train_student_distill
 from synthetic_demo import eps_to_rho
 
 HERE = Path(__file__).parent
 (HERE / "results").mkdir(exist_ok=True)
+
+CKPT_DIR = HERE / "checkpoints"      
+CKPT_DIR.mkdir(exist_ok=True)  
 
 K_VALUES = (3,)
 
@@ -73,14 +76,17 @@ def main():
     imp = {K: shared_importance(tk[K][0], DataLoader(train_ds, batch_size=8), dev).to(dev)
            for K in K_VALUES}
 
-    def students(cache):
-        return [train_student_distill(train_ds, val_loader, cache, dev, student_base=16,
-                                      teacher_base=32, n_epochs=args.se, lr=1e-3,
-                                      lambda_feat=0.4, seed=s, in_ch=in_ch)[0] for s in SEEDS]
-
-    def cell(K, am, sigma):
+    def students(cache, canal, e):
+        return [train_student_distill(
+                    train_ds, val_loader, cache, dev, student_base=16,
+                    teacher_base=32, n_epochs=args.se, lr=1e-3,
+                    lambda_feat=0.4, seed=s, in_ch=in_ch,
+                    save_path=CKPT_DIR / f"{args.dataset}_K{K_VALUES[0]}_canal{canal}_eps{e}_seed{s}.pt"
+                )[0] for s in SEEDS]
+    
+    def cell(K, am, sigma, canal, e):
         cache = precompute_joint_cache(tk[K][0], tk[K][1], train_ds, sigma, am, dev, seed=42)
-        d = students(cache)
+        d = students(cache, canal, e)
         return {"dices": d, "mean": float(np.mean(d)), "sem": float(np.std(d) / np.sqrt(len(d)))}
 
     def sweep(K, canal=False):
@@ -98,7 +104,7 @@ def main():
                 )
             else:
                 sigma = thresholded_uniform_sigma(deltas, rho, am)
-            out[f"{e}"] = cell(K, am, sigma)
+            out[f"{e}"] = cell(K, am, sigma, canal, e)
             print(f"   {args.dataset} K={K} canal={canal} ε={e}: {out[f'{e}']['mean']:.4f}")
         return out
 
