@@ -61,6 +61,15 @@ def shared_importance(teachers, train_loader, device):
     return torch.stack(imps, dim=0).mean(dim=0)
 
 
+def shared_importance_actnorm(teachers, train_loader, device):
+    """Same as shared_importance, but using activation-norm importance
+    (compute_importance_actnorm) instead of gradient-energy. Used only
+    for the grad-energy-vs-act-norm ablation, per Dr. Tian's request."""
+    from drive_local_demo import compute_importance_actnorm
+    imps = [compute_importance_actnorm(t, train_loader, device) for t in teachers]
+    return torch.stack(imps, dim=0).mean(dim=0)
+
+
 def thresholded_uniform_sigma(deltas, rho, active_mask):
     sigma = torch.zeros_like(deltas)
     if active_mask.any():
