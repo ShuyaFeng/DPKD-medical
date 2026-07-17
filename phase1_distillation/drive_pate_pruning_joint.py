@@ -47,7 +47,7 @@ from drive_local_demo import DriveDataset, compute_importance
 from synthetic_demo import (
     eps_to_rho, uniform_sigma, clip_and_normalise, denormalise,
 )
-from drive_pate_poc import partition_dataset, train_K_teachers
+from drive_pate_poc import partition_dataset, train_K_teachers, correct_uniform_sigma
 from drive_student_distill import train_student_distill
 
 
@@ -73,7 +73,7 @@ def shared_importance_actnorm(teachers, train_loader, device):
 def thresholded_uniform_sigma(deltas, rho, active_mask):
     sigma = torch.zeros_like(deltas)
     if active_mask.any():
-        sigma[active_mask] = uniform_sigma(deltas[active_mask], rho)
+        sigma[active_mask] = correct_uniform_sigma(deltas[active_mask], rho)
     return sigma
 
 
