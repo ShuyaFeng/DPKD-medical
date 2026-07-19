@@ -84,19 +84,24 @@ def test_waterfilling_sigma_zcdp_budget_satisfied():
 
 
 def test_importance_noise_sigma_has_factor_of_two():
-    """add_dp_noise_to_importance: sigma_imp = sensitivity / sqrt(2 * rho_imp)."""
+    """add_dp_noise_to_importance: sigma_imp = sensitivity / sqrt(2 * rho_imp).
+
+    Use large importance values so clamp(min=1e-6) never activates,
+    then measure std of the noise directly.
+    """
     sensitivity = 1.0
     rho_imp = 0.5
     expected_sigma = sensitivity / math.sqrt(2.0 * rho_imp)  # = 1.0
 
-    importance = torch.zeros(10000)
+    # Large base so clamp(min=1e-6) never fires; noise is unmodified
+    importance = torch.full((10000,), 1e6)
     noisy = add_dp_noise_to_importance(importance, sensitivity, rho_imp, seed=42)
-    noise = noisy - importance.clamp(min=1e-6)
-    approx_sigma = noise.abs().mean().item() / math.sqrt(2.0 / math.pi)
-    assert abs(approx_sigma - expected_sigma) < 0.05, (
+    noise = noisy - importance
+    sigma_est = noise.std().item()
+    assert abs(sigma_est - expected_sigma) < 0.05, (
         "FAIL: estimated sigma_imp={:.4f}, expected {:.4f}. "
         "Check that add_dp_noise_to_importance divides by sqrt(2*rho_imp).".format(
-            approx_sigma, expected_sigma
+            sigma_est, expected_sigma
         )
     )
 
