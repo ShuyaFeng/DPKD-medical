@@ -1,8 +1,7 @@
 #!/bin/bash
-# Submit all budget split experiments.
+# Submit all budget split experiments (fair comparison: f_imp=0 for both methods).
 #
 # Jobs submitted:
-#   1  caps diagnostic         (amperenodes,        ~3h)
 #   8  ISIC sweep  array 0-7  (amperenodes-medium,  up to 2 days)
 #   8  Kvasir sweep array 0-7 (amperenodes-medium,  up to 2 days)
 #   8  BUSI sweep  array 0-7  (pascalnodes-medium,  up to 2 days)
@@ -16,9 +15,6 @@ set -e
 SLURM_DIR="/home/ab36/DPKD-medical/phase1_distillation/slurm"
 LOG_DIR="/home/ab36/DPKD-medical/phase1_distillation/slurm_logs"
 mkdir -p "$LOG_DIR"
-
-echo "Submitting caps diagnostic (amperenodes, 3h)..."
-sbatch "$SLURM_DIR/run_caps_diagnostic.sh"
 
 echo "Submitting ISIC budget sweep — 8 jobs (amperenodes-medium, 2 days)..."
 sbatch "$SLURM_DIR/run_sweep_isic.sh"

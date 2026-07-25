@@ -1,27 +1,25 @@
 # -*- coding: utf-8 -*-
 """
-CANAL vs uniform comparison across privacy budget split configurations.
+CANAL vs uniform comparison — fair budget split.
 
-Measures per-sample clipping bounds (CLIP_IMP, CLIP_CAPS) directly from
-the data, privatizes caps and importance with their respective budget
-fractions, and compares CANAL water-filling against uniform allocation.
+Budget split:
+  rho_caps = f_caps * rho          (caps privatization, paid by both)
+  rho_rel  = (1 - f_caps) * rho   (channel noise, same for both)
 
-Budget split: rho_tot = rho_caps + rho_imp + rho_rel
-  - Both CANAL and uniform pay rho_caps for caps privatization.
-  - Uniform receives (rho_caps + rho_imp) for release since it does not
-    release importance; CANAL receives only rho_rel for release.
-  - This is the honest apples-to-apples comparison at the same total epsilon.
+Importance is computed cleanly and used internally by CANAL only to
+set per-channel noise levels via water-filling. It is never released,
+so it requires no privacy budget. Uniform ignores importance entirely
+and applies the same sigma to every channel.
 
 Usage:
     python canal_budget_sweep.py \\
         --dataset isic \\
-        --f_caps 0.10 --f_imp 0.45 --f_rel 0.45 \\
-        --clip_imp_type avg --clip_caps_type avg \\
+        --f_caps 0.10 --clip_caps_type avg \\
         --epsilons "1,2,4,8,16,32" \\
-        --seeds 5 --te 60 --se 40
+        --seeds 7 --te 60 --se 60
 
 Output:
-    results/budget_sweep_{dataset}_fc{f_caps}_fi{f_imp}_fr{f_rel}_{clip_imp_type}imp_{clip_caps_type}caps.json
+    results/budget_sweep_{dataset}_fc{f_caps}_{clip_caps_type}caps.json
 """
 
 import argparse
@@ -37,10 +35,7 @@ from torch.utils.data import DataLoader, Subset
 sys.path.insert(0, str(Path(__file__).parent))
 
 from drive_local_demo import task_loss
-from drive_pate_canal_combined import (
-    add_dp_noise_to_importance,
-    correct_waterfilling_sigma,
-)
+from drive_pate_canal_combined import correct_waterfilling_sigma
 from drive_pate_poc import partition_dataset, train_K_teachers
 from drive_pate_pruning_joint import (
     precompute_joint_cache,
@@ -71,41 +66,7 @@ def get_dataset(name, split, size):
     raise ValueError("Unknown dataset: {}".format(name))
 
 
-def measure_per_sample_imp_norms(teachers, train_ds, device):
-    """
-    Measure per-sample gradient-energy L2 norms across all teacher partitions.
-    Each patient contributes one norm: the L2 norm of their per-channel
-    mean squared gradient at the bottleneck.
-    Returns (mean_norm, p99_norm).
-    """
-    partitions = partition_dataset(len(train_ds), len(teachers))
-    all_norms = []
-    for teacher, idxs in zip(teachers, partitions):
-        teacher.eval()
-        subset = Subset(train_ds, idxs)
-        for i in range(len(subset)):
-            x, y = subset[i]
-            x = x.unsqueeze(0).to(device)
-            y = y.unsqueeze(0).to(device)
-            x.requires_grad_(True)
-            teacher.zero_grad(set_to_none=True)
-            e1, e2, e3 = teacher.encode(x)
-            e3.retain_grad()
-            loss = task_loss(teacher.decode(e1, e2, e3), y)
-            loss.backward()
-            g = e3.grad.detach().pow(2).mean(dim=(0, 2, 3))  # [C]
-            all_norms.append(g.norm().item())
-    norms = torch.tensor(all_norms)
-    return norms.mean().item(), norms.quantile(0.99).item()
-
-
 def measure_per_sample_cap_norms(teachers, train_ds, device):
-    """
-    Measure per-sample max per-channel activation L2 norm across all
-    teacher partitions. For each patient, this is the maximum over all
-    bottleneck channels of that channel's L2 spatial norm.
-    Returns (mean_norm, p99_norm).
-    """
     partitions = partition_dataset(len(train_ds), len(teachers))
     all_norms = []
     for teacher, idxs in zip(teachers, partitions):
@@ -116,20 +77,13 @@ def measure_per_sample_cap_norms(teachers, train_ds, device):
             x = x.unsqueeze(0).to(device)
             with torch.no_grad():
                 _, _, e3 = teacher.encode(x)
-            per_ch = e3[0].flatten(1).norm(dim=1)   # [C]
+            per_ch = e3[0].flatten(1).norm(dim=1)
             all_norms.append(per_ch.max().item())
     norms = torch.tensor(all_norms)
     return norms.mean().item(), norms.quantile(0.99).item()
 
 
 def privatize_caps(caps_list, clip_caps, n_train, rho_caps, seed=0):
-    """
-    Add Gaussian noise to each teacher's caps under rho_caps zCDP budget.
-      sensitivity = 2 * clip_caps / n_train
-      sigma_caps  = sensitivity / sqrt(2 * rho_caps)
-    Returns noisy_caps_list (CPU tensors, clamped positive).
-    If rho_caps <= 0, returns caps_list unchanged.
-    """
     if rho_caps <= 0:
         return caps_list
     sens  = 2.0 * clip_caps / float(n_train)
@@ -145,30 +99,20 @@ def privatize_caps(caps_list, clip_caps, n_train, rho_caps, seed=0):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", default="isic",
+    ap.add_argument("--dataset",        default="isic",
                     choices=["isic", "kvasir", "busi"])
-    ap.add_argument("--f_caps", type=float, default=0.10,
+    ap.add_argument("--f_caps",         type=float, default=0.10,
                     help="Fraction of rho for caps privatization.")
-    ap.add_argument("--f_imp",  type=float, default=0.45,
-                    help="Fraction of rho for importance privatization.")
-    ap.add_argument("--f_rel",  type=float, default=0.45,
-                    help="Fraction of rho for CANAL release.")
-    ap.add_argument("--clip_imp_type",  default="avg", choices=["avg", "p99"],
-                    help="Use mean or p99 of per-sample importance norms as CLIP_IMP.")
     ap.add_argument("--clip_caps_type", default="avg", choices=["avg", "p99"],
                     help="Use mean or p99 of per-sample cap norms as CLIP_CAPS.")
-    ap.add_argument("--size",     type=int,   default=96)
-    ap.add_argument("--seeds",    type=int,   default=5)
-    ap.add_argument("--epsilons", type=str,   default="1,2,4,8,16,32")
-    ap.add_argument("--te",       type=int,   default=60,
+    ap.add_argument("--size",           type=int,   default=96)
+    ap.add_argument("--seeds",          type=int,   default=7)
+    ap.add_argument("--epsilons",       type=str,   default="1,2,4,8,16,32")
+    ap.add_argument("--te",             type=int,   default=60,
                     help="Teacher training epochs.")
-    ap.add_argument("--se",       type=int,   default=40,
+    ap.add_argument("--se",             type=int,   default=60,
                     help="Student training epochs.")
     args = ap.parse_args()
-
-    total = args.f_caps + args.f_imp + args.f_rel
-    assert abs(total - 1.0) < 1e-5, \
-        "f_caps + f_imp + f_rel must equal 1.0, got {:.6f}".format(total)
 
     dev = ("cuda" if torch.cuda.is_available()
            else "mps" if torch.backends.mps.is_available() else "cpu")
@@ -181,11 +125,9 @@ def main():
     N = len(train_ds)
 
     print("[{}] device={}  N={}  in_ch={}".format(args.dataset, dev, N, in_ch))
-    print("  split: f_caps={} f_imp={} f_rel={}".format(
-        args.f_caps, args.f_imp, args.f_rel))
-    print("  clip_imp={}  clip_caps={}".format(
-        args.clip_imp_type, args.clip_caps_type))
-    print("  epsilons={}  seeds={}".format(EPS, SEEDS))
+    print("  f_caps={}  clip_caps={}".format(args.f_caps, args.clip_caps_type))
+    print("  epsilons={}  seeds={}  te={}  se={}".format(
+        EPS, SEEDS, args.te, args.se))
 
     # --- Train teachers ---
     print("\nTraining {} teachers ({} epochs)...".format(K, args.te))
@@ -193,15 +135,6 @@ def main():
         train_ds, K, dev, n_epochs=args.te, in_ch=in_ch
     )
     Cb = teachers[0].base * 4
-
-    # --- Measure per-sample importance norms ---
-    print("\nMeasuring per-sample importance norms...")
-    clip_imp_avg, clip_imp_p99 = measure_per_sample_imp_norms(
-        teachers, train_ds, dev
-    )
-    clip_imp = clip_imp_avg if args.clip_imp_type == "avg" else clip_imp_p99
-    print("  avg={:.4e}  p99={:.4e}  using ({})={:.4e}".format(
-        clip_imp_avg, clip_imp_p99, args.clip_imp_type, clip_imp))
 
     # --- Measure per-sample cap norms ---
     print("\nMeasuring per-sample cap norms...")
@@ -212,17 +145,16 @@ def main():
     print("  avg={:.4e}  p99={:.4e}  using ({})={:.4e}".format(
         clip_caps_avg, clip_caps_p99, args.clip_caps_type, clip_caps))
 
-    # --- Compute shared (clean) importance ---
-    print("\nComputing shared importance...")
+    # --- Compute clean importance (internal only, no budget charged) ---
+    print("\nComputing importance (clean, internal)...")
     imp_clean = shared_importance(
         teachers, DataLoader(train_ds, batch_size=8), dev
     ).to(dev)
     print("  imp mean={:.4e}  max={:.4e}".format(
         imp_clean.mean().item(), imp_clean.max().item()))
 
-    deltas   = torch.full((Cb,), 2.0 / K, device=dev)
-    am       = torch.ones(Cb, dtype=torch.bool, device=dev)
-    sens_imp = 2.0 * clip_imp / float(N)
+    deltas = torch.full((Cb,), 2.0 / K, device=dev)
+    am     = torch.ones(Cb, dtype=torch.bool, device=dev)
 
     # --- Results container ---
     R = {
@@ -230,18 +162,12 @@ def main():
         "in_ch":          in_ch,
         "n_train":        N,
         "f_caps":         args.f_caps,
-        "f_imp":          args.f_imp,
-        "f_rel":          args.f_rel,
-        "clip_imp_type":  args.clip_imp_type,
-        "clip_imp_avg":   clip_imp_avg,
-        "clip_imp_p99":   clip_imp_p99,
-        "clip_imp_used":  clip_imp,
         "clip_caps_type": args.clip_caps_type,
         "clip_caps_avg":  clip_caps_avg,
         "clip_caps_p99":  clip_caps_p99,
         "clip_caps_used": clip_caps,
         "imp_clean_mean": imp_clean.mean().item(),
-        "sens_imp":       sens_imp,
+        "imp_clean_max":  imp_clean.max().item(),
         "epsilons":       EPS,
         "seeds":          SEEDS,
         "series":         {},
@@ -265,37 +191,31 @@ def main():
 
     print("\n--- Experiments ---")
     for e in EPS:
-        rho          = eps_to_rho(e)
-        rho_caps     = args.f_caps * rho
-        rho_imp      = args.f_imp  * rho
-        rho_rel_canal   = args.f_rel * rho
-        # Uniform does not pay rho_imp; it receives that portion for release
-        rho_rel_uniform = (1.0 - args.f_caps) * rho
+        rho     = eps_to_rho(e)
+        rho_caps = args.f_caps * rho
+        rho_rel  = (1.0 - args.f_caps) * rho   # same for both methods
 
-        # Privatize caps — identical noisy caps used by both methods
+        # Privatize caps — same noisy caps used by both methods
         caps_noisy = privatize_caps(
             caps_list, clip_caps, N, rho_caps, seed=int(e * 100)
         )
 
-        # -- UNIFORM --
-        sigma_uni  = thresholded_uniform_sigma(deltas, rho_rel_uniform, am)
+        # -- UNIFORM: same sigma on every channel --
+        sigma_uni  = thresholded_uniform_sigma(deltas, rho_rel, am)
         cache_uni  = precompute_joint_cache(
             teachers, caps_noisy, train_ds, sigma_uni, am, dev, seed=42
         )
         dices_uni  = run_students(cache_uni, "uni_e{}".format(e), e)
         uniform_results[str(e)] = {
-            "dices":    dices_uni,
-            "mean":     float(np.mean(dices_uni)),
-            "sem":      float(np.std(dices_uni) / np.sqrt(len(dices_uni))),
-            "rho_rel":  rho_rel_uniform,
+            "dices":   dices_uni,
+            "mean":    float(np.mean(dices_uni)),
+            "sem":     float(np.std(dices_uni) / np.sqrt(len(dices_uni))),
+            "rho_rel": rho_rel,
         }
 
-        # -- CANAL --
-        imp_noisy   = add_dp_noise_to_importance(
-            imp_clean, sens_imp, rho_imp, seed=int(e * 100) + 1
-        )
+        # -- CANAL: water-filling using clean importance, same rho_rel --
         sigma_canal = correct_waterfilling_sigma(
-            deltas, imp_noisy.to(dev), rho_rel_canal
+            deltas, imp_clean, rho_rel
         )
         cache_canal = precompute_joint_cache(
             teachers, caps_noisy, train_ds, sigma_canal, am, dev, seed=42
@@ -305,7 +225,7 @@ def main():
             "dices":   dices_canal,
             "mean":    float(np.mean(dices_canal)),
             "sem":     float(np.std(dices_canal) / np.sqrt(len(dices_canal))),
-            "rho_rel": rho_rel_canal,
+            "rho_rel": rho_rel,
         }
 
         u = uniform_results[str(e)]["mean"]
@@ -316,10 +236,7 @@ def main():
     R["series"]["uniform"] = uniform_results
     R["series"]["canal"]   = canal_results
 
-    tag = "fc{:.2f}_fi{:.2f}_fr{:.2f}_{}imp_{}caps".format(
-        args.f_caps, args.f_imp, args.f_rel,
-        args.clip_imp_type, args.clip_caps_type
-    )
+    tag = "fc{:.2f}_{}caps".format(args.f_caps, args.clip_caps_type)
     out_path = HERE / "results" / "budget_sweep_{}_{}.json".format(
         args.dataset, tag
     )
