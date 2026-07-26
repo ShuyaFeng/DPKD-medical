@@ -8,6 +8,9 @@ __pycache__/
 # download instructions in README / phase0_drive_real.py.
 data/
 
+# Paper directory (local only, not committed)
+WACV26/
+
 # LaTeX build artifacts
 *.aux
 *.log
