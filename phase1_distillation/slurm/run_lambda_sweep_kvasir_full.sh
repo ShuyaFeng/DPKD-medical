@@ -1,0 +1,33 @@
+#!/bin/bash
+#SBATCH --job-name=lambda_sw_kvasir_full
+#SBATCH --partition=amperenodes-long
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
+#SBATCH --time=1-00:00:00
+#SBATCH --output=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/lambda_sweep_kvasir_full_%j.out
+#SBATCH --error=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/lambda_sweep_kvasir_full_%j.err
+
+echo "=========================================="
+echo "Lambda sweep FULL RERUN (all eps, incremental save) — Kvasir"
+echo "Job ID: $SLURM_JOB_ID  Node: $(hostname)  Start: $(date)"
+echo "=========================================="
+
+module load Anaconda3
+source $(conda info --base)/etc/profile.d/conda.sh
+conda activate mmseg-cu124-240
+
+if [[ "$CONDA_DEFAULT_ENV" != "mmseg-cu124-240" ]]; then
+    echo "ERROR: conda environment did not activate."
+    exit 1
+fi
+
+cd /home/ab36/DPKD-medical/phase1_distillation
+
+python -u canal_lambda_sweep.py \
+    --dataset kvasir \
+    --seeds 3 --te 60 --se 40 \
+    --epsilons "0.5,1,2,4,6" \
+    --lambdas "0.1,0.4,1.0,2.0,5.0,10.0"
+
+echo "Finished: $(date)"

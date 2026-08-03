@@ -189,6 +189,11 @@ def main():
             print(f"    top_uni={cell_uni['mean']:.4f}  top_canal={cell_canal['mean']:.4f}"
                   f"  diff={cell_canal['mean']-cell_uni['mean']:+.4f}  ({elapsed:.1f}s)")
 
+        # Incremental save after each epsilon completes
+        out = HERE / "results" / f"{args.dataset}_lambda_sweep_results.json"
+        out.write_text(json.dumps(results, indent=2))
+        print(f"  [checkpoint saved after eps={eps}]")
+
     # Summary table: for each eps, show uniform and canal across all lambdas
     for eps in EPS:
         print(f"\n{'='*72}")
