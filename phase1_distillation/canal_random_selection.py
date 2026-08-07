@@ -4,13 +4,16 @@ Random vs importance-based channel selection (PRIORITY experiment).
 Question: does the gain from channel selection come from picking IMPORTANT
 channels, or just from concentrating budget on ANY subset of channels?
 
-Four conditions at keep=10% (n_keep ≈ C/10 channels):
+Five conditions at keep=10% (n_keep ≈ C/10 channels):
   1. all_uniform  — all C channels, uniform sigma  (full-budget baseline)
   2. top_uniform  — top-n_keep by importance, uniform sigma
-  3. rand_uniform — N_RAND random subsets of n_keep channels, dice avg over subsets
-  4. top_canal    — top-n_keep by importance, WF sigma
+  3. rand_uniform — N_RAND random subsets of n_keep channels, uniform sigma, avg
+  4. top_canal    — top-n_keep by importance, WF sigma  (full CANAL)
+  5. rand_canal   — N_RAND random subsets of n_keep channels, WF sigma, avg
 
-Interpretation:
+Key comparisons:
+  top_canal vs rand_canal  →  does importance-based selection improve WF?
+  rand_canal vs rand_uniform → does WF help when channels are chosen randomly?
   rand ≈ top  →  gain is from budget concentration alone (any K channels works)
   rand << top →  importance ranking is crucial for selection gain
 
@@ -169,25 +172,32 @@ def main():
         ep_res["top_uniform"] = cell_stats(dices)
         print(f"  Dice={ep_res['top_uniform']['mean']:.4f}  ({time.time()-t0:.1f}s)")
 
-        # --- 3. random-n_keep + uniform (avg over N_RAND configs) ---
-        print(f"  [3/4] rand_uniform  ({N_RAND} random configs) ...")
-        rand_all_dices = []
+        # --- 3. random-n_keep + uniform AND canal (avg over N_RAND configs) ---
+        print(f"  [3/5] rand_uniform + rand_canal  ({N_RAND} random configs) ...")
+        rand_uni_dices = []
+        rand_canal_dices = []
         for r in range(N_RAND):
             rand_perm = torch.randperm(
                 Cb, generator=torch.Generator().manual_seed(r * 137 + int(eps * 1000))
             )
             rand_idx = rand_perm[:n_keep]
-            rand_mask, sigma_rand = build_sigma(Cb, rand_idx, deltas, imp_noisy, rho_rel, "uniform", dev)
-            dices = run_students(train_ds, val_loader, teachers, caps_list,
-                                 rand_mask, sigma_rand, dev, SEEDS, args.se, in_ch,
-                                 cache_seed=int(eps * 1000) + 30 + r)
-            rand_all_dices.extend(dices)
-            print(f"    rand_config {r+1}/{N_RAND}  Dice={np.mean(dices):.4f}")
-        ep_res["rand_uniform"] = cell_stats(rand_all_dices)
-        print(f"  rand_uniform mean={ep_res['rand_uniform']['mean']:.4f}±{ep_res['rand_uniform']['sem']:.4f}")
+            rand_mask_u, sigma_rand_u = build_sigma(Cb, rand_idx, deltas, imp_noisy, rho_rel, "uniform", dev)
+            rand_mask_c, sigma_rand_c = build_sigma(Cb, rand_idx, deltas, imp_noisy, rho_rel, "canal", dev)
+            dices_u = run_students(train_ds, val_loader, teachers, caps_list,
+                                   rand_mask_u, sigma_rand_u, dev, SEEDS, args.se, in_ch,
+                                   cache_seed=int(eps * 1000) + 30 + r)
+            dices_c = run_students(train_ds, val_loader, teachers, caps_list,
+                                   rand_mask_c, sigma_rand_c, dev, SEEDS, args.se, in_ch,
+                                   cache_seed=int(eps * 1000) + 60 + r)
+            rand_uni_dices.extend(dices_u)
+            rand_canal_dices.extend(dices_c)
+            print(f"    rand_config {r+1}/{N_RAND}  uni={np.mean(dices_u):.4f}  canal={np.mean(dices_c):.4f}")
+        ep_res["rand_uniform"] = cell_stats(rand_uni_dices)
+        ep_res["rand_canal"] = cell_stats(rand_canal_dices)
+        print(f"  rand_uniform mean={ep_res['rand_uniform']['mean']:.4f}  rand_canal mean={ep_res['rand_canal']['mean']:.4f}")
 
         # --- 4. top-n_keep + CANAL ---
-        print("  [4/4] top_canal ...", end="", flush=True)
+        print("  [4/5] top_canal ...", end="", flush=True)
         t0 = time.time()
         top_mask_c, sigma_canal = build_sigma(Cb, top_indices, deltas, imp_noisy, rho_rel, "canal", dev)
         dices = run_students(train_ds, val_loader, teachers, caps_list,
@@ -199,20 +209,19 @@ def main():
         results["sweep"][str(eps)] = ep_res
 
     # Summary
-    print("\n" + "="*88)
-    print(f"RANDOM vs IMPORTANCE SELECTION  ({args.dataset.upper()}, K={K}, keep={KEEP_FRAC*100:.0f}%)")
-    print(f"{'eps':>5} | {'all_uni':>9} | {'top_uni':>9} | {'rand_uni':>9} | {'top_canal':>10} | "
-          f"{'top-rand':>9} | {'canal-top':>10}")
-    print("-"*88)
+    print("\n" + "="*100)
+    print(f"TOP vs RANDOM CANAL  ({args.dataset.upper()}, K={K}, keep={KEEP_FRAC*100:.0f}%)")
+    print(f"{'eps':>5} | {'all_uni':>8} | {'top_uni':>8} | {'rand_uni':>9} | {'top_canal':>9} | {'rand_canal':>10} | {'topc-randc':>11}")
+    print("-"*100)
     for eps in EPS:
         r = results["sweep"][str(eps)]
         au = r["all_uniform"]["mean"]
         tu = r["top_uniform"]["mean"]
         ru = r["rand_uniform"]["mean"]
         tc = r["top_canal"]["mean"]
-        print(f"{eps:>5.1f} | {au:>9.4f} | {tu:>9.4f} | {ru:>9.4f} | {tc:>10.4f} | "
-              f"{tu-ru:>+9.4f} | {tc-tu:>+10.4f}")
-    print("="*88)
+        rc = r["rand_canal"]["mean"]
+        print(f"{eps:>5.1f} | {au:>8.4f} | {tu:>8.4f} | {ru:>9.4f} | {tc:>9.4f} | {rc:>10.4f} | {tc-rc:>+11.4f}")
+    print("="*100)
 
     out = HERE / "results" / f"{args.dataset}_random_selection_results.json"
     out.write_text(json.dumps(results, indent=2))

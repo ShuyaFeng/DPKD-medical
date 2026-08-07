@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=rand_sel_busi
-#SBATCH --partition=amperenodes-medium
+#SBATCH --partition=amperenodes-long
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=0-10:00:00
+#SBATCH --time=0-18:00:00
 #SBATCH --output=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/rand_sel_busi_%j.out
 #SBATCH --error=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/rand_sel_busi_%j.err
 
