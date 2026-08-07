@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=rand_sel_v2_busi
-#SBATCH --partition=amperenodes-long
+#SBATCH --partition=amperenodes-medium
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
