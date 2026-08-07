@@ -109,6 +109,7 @@ def main():
     ap.add_argument("--te", type=int, default=60)
     ap.add_argument("--se", type=int, default=40)
     ap.add_argument("--epsilons", default="0.5,1,2,4,6")
+    ap.add_argument("--suffix", default="", help="appended to output filename, e.g. '_v2'")
     args = ap.parse_args()
 
     dev = ("cuda" if torch.cuda.is_available()
@@ -223,7 +224,7 @@ def main():
         print(f"{eps:>5.1f} | {au:>8.4f} | {tu:>8.4f} | {ru:>9.4f} | {tc:>9.4f} | {rc:>10.4f} | {tc-rc:>+11.4f}")
     print("="*100)
 
-    out = HERE / "results" / f"{args.dataset}_random_selection_results.json"
+    out = HERE / "results" / f"{args.dataset}_random_selection{args.suffix}_results.json"
     out.write_text(json.dumps(results, indent=2))
     print(f"\nSaved: {out}")
 
