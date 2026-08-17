@@ -15,7 +15,7 @@ variance to exploit.
 Strategy 8 (reverse CANAL / sanity check): flip the importance so HIGHER
 importance gets MORE noise (inverse water-filling).
 
-  imp_reversed = 1.0 / imp.clamp(min=1e-6)   (then renormalized)
+  imp_reversed = 1.0 / imp.clamp(min=1e-12)   (then renormalized)
 
 If reverse hurts vs uniform  → confirms CANAL theory (important channels need less noise).
 If reverse helps vs standard CANAL → suggests a different mechanism is operating.
@@ -76,7 +76,7 @@ def scale_importance(imp, alpha):
 def reverse_importance(imp):
     """Invert importance: high-importance channels get high 'reversed' score
     so water-filling assigns them MORE noise (sanity check experiment)."""
-    inv = 1.0 / imp.clamp(min=1e-6)
+    inv = 1.0 / imp.clamp(min=1e-12)
     return inv / inv.mean()  # normalize so scale matches original
 
 
