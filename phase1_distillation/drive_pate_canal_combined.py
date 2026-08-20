@@ -68,7 +68,7 @@ def add_dp_noise_to_importance(importance, sensitivity, rho_imp, seed=42):
     g = torch.Generator()
     g.manual_seed(int(seed))
     noise = torch.randn(importance.shape, generator=g) * sigma_imp
-    return (importance.detach().cpu() + noise).clamp(min=1e-6).to(importance.device)
+    return (importance.detach().cpu() + noise).clamp(min=1e-12).to(importance.device)
 
 
 def correct_waterfilling_sigma_honest(
