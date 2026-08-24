@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=final_canal_isic
-#SBATCH --partition=amperenodes-medium
+#SBATCH --partition=pascalnodes
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=0-10:00:00
+#SBATCH --time=0-12:00:00
 #SBATCH --output=/home/ialam/DPKD-medical/phase1_distillation/slurm_logs/final_canal_isic_%j.out
 #SBATCH --error=/home/ialam/DPKD-medical/phase1_distillation/slurm_logs/final_canal_isic_%j.err
 
