@@ -5,8 +5,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=0-12:00:00
-#SBATCH --output=/home/ialam/DPKD-medical/phase1_distillation/slurm_logs/final_canal_isic_%j.out
-#SBATCH --error=/home/ialam/DPKD-medical/phase1_distillation/slurm_logs/final_canal_isic_%j.err
+#SBATCH --output=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/final_canal_isic_%j.out
+#SBATCH --error=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/final_canal_isic_%j.err
 
 echo "=========================================="
 echo "Final CANAL experiment — ISIC"
@@ -22,7 +22,7 @@ if [[ "$CONDA_DEFAULT_ENV" != "mmseg-cu124-240" ]]; then
     exit 1
 fi
 
-cd /home/ialam/DPKD-medical/phase1_distillation
+cd /home/ab36/DPKD-medical/phase1_distillation
 
 python -u canal_final_experiment.py \
     --dataset isic \
