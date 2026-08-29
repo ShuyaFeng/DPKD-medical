@@ -40,6 +40,7 @@ from synthetic_demo import eps_to_rho
 
 HERE = Path(__file__).parent
 (HERE / "results").mkdir(exist_ok=True)
+(HERE / "checkpoints").mkdir(exist_ok=True)
 
 K         = 3
 KEEP_FRAC = 0.10
@@ -96,17 +97,20 @@ def privatize_caps(caps_list, clip_caps, n_train, rho_caps, seed=0):
 
 
 def run_students(train_ds, val_loader, teachers, caps_noisy, active_mask, sigma,
-                 device, seeds, n_epochs_student, in_ch, cache_seed):
+                 device, seeds, n_epochs_student, in_ch, cache_seed,
+                 dataset, is_canal, eps):
     cache = precompute_joint_cache(
         teachers, caps_noisy, train_ds, sigma, active_mask, device, seed=cache_seed
     )
     dices = []
     for s in seeds:
+        save_path = HERE / "checkpoints" / f"{dataset}_K3_canal{is_canal}_eps{eps}_seed{s}.pt"
         best, _ = train_student_distill(
             train_ds, val_loader, cache, device,
             student_base=16, teacher_base=32,
             n_epochs=n_epochs_student, lr=1e-3, lambda_feat=0.4,
             seed=s, in_ch=in_ch,
+            save_path=save_path,
         )
         dices.append(best)
     return dices
@@ -221,7 +225,8 @@ def main():
         t0 = time.time()
         dices = run_students(train_ds, val_loader, teachers, caps_noisy,
                              top_mask, sigma_uni, dev, SEEDS, args.se, in_ch,
-                             cache_seed=int(eps * 1000) + 1)
+                             cache_seed=int(eps * 1000) + 1,
+                             dataset=args.dataset, is_canal=False, eps=eps)
         ep_res["uniform"] = cell_stats(dices)
         print(f"  Dice={ep_res['uniform']['mean']:.4f}  ({time.time()-t0:.1f}s)")
 
@@ -235,7 +240,8 @@ def main():
         t0 = time.time()
         dices = run_students(train_ds, val_loader, teachers, caps_noisy,
                              top_mask, sigma_wf, dev, SEEDS, args.se, in_ch,
-                             cache_seed=int(eps * 1000) + 2)
+                             cache_seed=int(eps * 1000) + 2,
+                             dataset=args.dataset, is_canal=True, eps=eps)
         ep_res["canal"] = cell_stats(dices)
         diff = ep_res["canal"]["mean"] - ep_res["uniform"]["mean"]
         print(f"  Dice={ep_res['canal']['mean']:.4f}  diff={diff:+.4f}  ({time.time()-t0:.1f}s)")
