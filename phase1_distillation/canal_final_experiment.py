@@ -98,13 +98,13 @@ def privatize_caps(caps_list, clip_caps, n_train, rho_caps, seed=0):
 
 def run_students(train_ds, val_loader, teachers, caps_noisy, active_mask, sigma,
                  device, seeds, n_epochs_student, in_ch, cache_seed,
-                 dataset, is_canal, eps):
+                 dataset, is_canal, eps, suffix=""):
     cache = precompute_joint_cache(
         teachers, caps_noisy, train_ds, sigma, active_mask, device, seed=cache_seed
     )
     dices = []
     for s in seeds:
-        save_path = HERE / "checkpoints" / f"{dataset}_K3_canal{is_canal}_eps{eps}_seed{s}.pt"
+        save_path = HERE / "checkpoints" / f"{dataset}_K3_canal{is_canal}_eps{eps}_seed{s}{suffix}.pt"
         best, _ = train_student_distill(
             train_ds, val_loader, cache, device,
             student_base=16, teacher_base=32,
@@ -131,12 +131,14 @@ def main():
     ap.add_argument("--te",       type=int, default=60)
     ap.add_argument("--se",       type=int, default=40)
     ap.add_argument("--epsilons", default="1,2,4,8")
+    ap.add_argument("--suffix",   default="", help="suffix appended to result and checkpoint filenames to avoid overwriting")
     args = ap.parse_args()
 
     dev   = ("cuda" if torch.cuda.is_available()
              else "mps" if torch.backends.mps.is_available() else "cpu")
     EPS   = [float(e) for e in args.epsilons.split(",")]
     SEEDS = list(range(100, 100 + args.seeds * 100, 100))
+    sfx   = f"_{args.suffix}" if args.suffix else ""
 
     print(f"[{args.dataset}] device={dev}  K={K}  eps={EPS}  seeds={SEEDS}")
     print(f"  budget split: fc={FC}  fi={FI}  fr={FR}")
@@ -226,7 +228,7 @@ def main():
         dices = run_students(train_ds, val_loader, teachers, caps_noisy,
                              top_mask, sigma_uni, dev, SEEDS, args.se, in_ch,
                              cache_seed=int(eps * 1000) + 1,
-                             dataset=args.dataset, is_canal=False, eps=eps)
+                             dataset=args.dataset, is_canal=False, eps=eps, suffix=sfx)
         ep_res["uniform"] = cell_stats(dices)
         print(f"  Dice={ep_res['uniform']['mean']:.4f}  ({time.time()-t0:.1f}s)")
 
@@ -241,7 +243,7 @@ def main():
         dices = run_students(train_ds, val_loader, teachers, caps_noisy,
                              top_mask, sigma_wf, dev, SEEDS, args.se, in_ch,
                              cache_seed=int(eps * 1000) + 2,
-                             dataset=args.dataset, is_canal=True, eps=eps)
+                             dataset=args.dataset, is_canal=True, eps=eps, suffix=sfx)
         ep_res["canal"] = cell_stats(dices)
         diff = ep_res["canal"]["mean"] - ep_res["uniform"]["mean"]
         print(f"  Dice={ep_res['canal']['mean']:.4f}  diff={diff:+.4f}  ({time.time()-t0:.1f}s)")
@@ -257,7 +259,7 @@ def main():
         diff = r["canal"]["mean"] - r["uniform"]["mean"]
         print(f"  {eps:5.1f}  {r['uniform']['mean']:.4f}    {r['canal']['mean']:.4f}   {diff:+.4f}")
 
-    out = HERE / "results" / f"{args.dataset}_final_canal_results.json"
+    out = HERE / "results" / f"{args.dataset}_final_canal_results{sfx}.json"
     out.write_text(json.dumps(results, indent=2))
     print(f"\nSaved: {out}")
 
