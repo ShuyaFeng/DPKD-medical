@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 canal_final_experiment.py — Definitive CANAL vs Uniform comparison.
 
