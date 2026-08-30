@@ -22,6 +22,7 @@ ap.add_argument("--epsilon", required=True, type=str)
 ap.add_argument("--uniform-seed", required=True, type=int)
 ap.add_argument("--canal-seed", required=True, type=int)
 ap.add_argument("--filename", required=True, help="exact filename (no extension), e.g. benign_286")
+ap.add_argument("--suffix", default="", help="checkpoint filename suffix, e.g. rerun3 for ISIC")
 ap.add_argument("--size", type=int, default=96)
 ap.add_argument("--upscale", type=int, default=6, help="upscale factor for a crisper exported image")
 args = ap.parse_args()
@@ -48,7 +49,8 @@ if args.filename not in all_filenames:
 idx = all_filenames.index(args.filename)
 
 def load_model(seed, canal_bool):
-    ckpt_path = HERE / "checkpoints" / f"{args.dataset}_K3_canal{canal_bool}_eps{args.epsilon}_seed{seed}.pt"
+    sfx = f"_{args.suffix}" if args.suffix else ""
+    ckpt_path = HERE / "checkpoints" / f"{args.dataset}_K3_canal{canal_bool}_eps{args.epsilon}_seed{seed}{sfx}.pt"
     ckpt = torch.load(ckpt_path, map_location=dev, weights_only=False)
     model = TinyUNet(in_ch=ckpt["in_ch"], num_classes=2, base=ckpt["student_base"]).to(dev)
     model.load_state_dict(ckpt["state_dict"])
@@ -69,7 +71,7 @@ def to_display_rgb(x_tensor):
 def mask_to_rgb(mask_tensor):
     arr = mask_tensor.cpu().numpy()
     rgb = np.zeros((*arr.shape, 3), dtype=np.uint8)
-    rgb[arr == 1] = (255, 0, 0)
+    rgb[arr == 1] = (255, 255, 255)
     return rgb
 
 @torch.no_grad()
@@ -90,10 +92,10 @@ out_dir = HERE / "qualitative_exports"
 out_dir.mkdir(exist_ok=True)
 prefix = f"{args.dataset}_{args.filename}_eps{args.epsilon}"
 
-Image.fromarray(to_display_rgb(x)).resize((disp_sz, disp_sz), Image.NEAREST).save(out_dir / f"{prefix}_input.png")
-Image.fromarray(mask_to_rgb(y_gt)).resize((disp_sz, disp_sz), Image.NEAREST).save(out_dir / f"{prefix}_groundtruth.png")
-Image.fromarray(mask_to_rgb(uni_pred)).resize((disp_sz, disp_sz), Image.NEAREST).save(out_dir / f"{prefix}_uniform_dice{uni_dice:.3f}.png")
-Image.fromarray(mask_to_rgb(can_pred)).resize((disp_sz, disp_sz), Image.NEAREST).save(out_dir / f"{prefix}_canal_dice{can_dice:.3f}.png")
+Image.fromarray(to_display_rgb(x)).resize((disp_sz, disp_sz), Image.Resampling.NEAREST).save(out_dir / f"{prefix}_input.png")
+Image.fromarray(mask_to_rgb(y_gt)).resize((disp_sz, disp_sz), Image.Resampling.NEAREST).save(out_dir / f"{prefix}_groundtruth.png")
+Image.fromarray(mask_to_rgb(uni_pred)).resize((disp_sz, disp_sz), Image.Resampling.NEAREST).save(out_dir / f"{prefix}_uniform_dice{uni_dice:.3f}.png")
+Image.fromarray(mask_to_rgb(can_pred)).resize((disp_sz, disp_sz), Image.Resampling.NEAREST).save(out_dir / f"{prefix}_canal_dice{can_dice:.3f}.png")
 
 print(f"\nSaved 4 images to {out_dir}/:")
 print(f"  {prefix}_input.png")

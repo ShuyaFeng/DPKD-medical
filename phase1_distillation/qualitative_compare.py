@@ -25,6 +25,7 @@ ap.add_argument("--uniform-seed", required=True, type=int)
 ap.add_argument("--canal-seed", required=True, type=int)
 ap.add_argument("--filenames", required=True, nargs="+",
                 help="exact filenames (no extension) to display, e.g. benign_286 malignant_114 benign_138")
+ap.add_argument("--suffix", default="", help="checkpoint filename suffix, e.g. rerun3 for ISIC")
 ap.add_argument("--size", type=int, default=96)
 ap.add_argument("--upscale", type=int, default=4, help="display upscale factor for clarity")
 args = ap.parse_args()
@@ -54,7 +55,8 @@ for fname in args.filenames:
         raise ValueError(f"filename '{fname}' not found in {args.dataset} val set")
 
 def load_model(seed, canal_bool):
-    ckpt_path = HERE / "checkpoints" / f"{args.dataset}_K3_canal{canal_bool}_eps{args.epsilon}_seed{seed}.pt"
+    sfx = f"_{args.suffix}" if args.suffix else ""
+    ckpt_path = HERE / "checkpoints" / f"{args.dataset}_K3_canal{canal_bool}_eps{args.epsilon}_seed{seed}{sfx}.pt"
     ckpt = torch.load(ckpt_path, map_location=dev, weights_only=False)
     model = TinyUNet(in_ch=ckpt["in_ch"], num_classes=2, base=ckpt["student_base"]).to(dev)
     model.load_state_dict(ckpt["state_dict"])
@@ -75,7 +77,7 @@ def to_display_rgb(x_tensor):
 def mask_to_rgb(mask_tensor):
     arr = mask_tensor.cpu().numpy()
     rgb = np.zeros((*arr.shape, 3), dtype=np.uint8)
-    rgb[arr == 1] = (255, 0, 0)
+    rgb[arr == 1] = (255, 255, 255)
     return rgb
 
 @torch.no_grad()
@@ -111,10 +113,10 @@ for fname in args.filenames:
     uni_pred, uni_dice = predict_and_dice(uniform_model, x, y_gt)
     can_pred, can_dice = predict_and_dice(canal_model, x, y_gt)
 
-    input_img = Image.fromarray(to_display_rgb(x)).resize((disp_sz, disp_sz), Image.NEAREST)
-    gt_img = Image.fromarray(mask_to_rgb(y_gt)).resize((disp_sz, disp_sz), Image.NEAREST)
-    uni_img = Image.fromarray(mask_to_rgb(uni_pred)).resize((disp_sz, disp_sz), Image.NEAREST)
-    can_img = Image.fromarray(mask_to_rgb(can_pred)).resize((disp_sz, disp_sz), Image.NEAREST)
+    input_img = Image.fromarray(to_display_rgb(x)).resize((disp_sz, disp_sz), Image.Resampling.NEAREST)
+    gt_img = Image.fromarray(mask_to_rgb(y_gt)).resize((disp_sz, disp_sz), Image.Resampling.NEAREST)
+    uni_img = Image.fromarray(mask_to_rgb(uni_pred)).resize((disp_sz, disp_sz), Image.Resampling.NEAREST)
+    can_img = Image.fromarray(mask_to_rgb(can_pred)).resize((disp_sz, disp_sz), Image.Resampling.NEAREST)
 
     draw.text((4, y + disp_sz // 2), fname, fill="black")
     canvas.paste(input_img, (row_label_w, y))

@@ -19,6 +19,7 @@ ap.add_argument("--dataset", required=True, choices=["busi", "kvasir", "isic"])
 ap.add_argument("--epsilon", required=True, type=str)
 ap.add_argument("--uniform-seed", required=True, type=int)
 ap.add_argument("--canal-seed", required=True, type=int)
+ap.add_argument("--suffix", default="", help="checkpoint filename suffix, e.g. rerun3 for ISIC")
 ap.add_argument("--size", type=int, default=96)
 args = ap.parse_args()
 
@@ -43,7 +44,8 @@ filenames = [Path(p).stem for p in sorted(glob.glob(str(in_dir / "*.png")))]
 assert len(filenames) == len(val_ds), f"{len(filenames)} filenames vs {len(val_ds)} dataset items -- mismatch!"
 
 def load_model(seed, canal_bool):
-    ckpt_path = HERE / "checkpoints" / f"{args.dataset}_K3_canal{canal_bool}_eps{args.epsilon}_seed{seed}.pt"
+    sfx = f"_{args.suffix}" if args.suffix else ""
+    ckpt_path = HERE / "checkpoints" / f"{args.dataset}_K3_canal{canal_bool}_eps{args.epsilon}_seed{seed}{sfx}.pt"
     ckpt = torch.load(ckpt_path, map_location=dev, weights_only=False)
     model = TinyUNet(in_ch=ckpt["in_ch"], num_classes=2, base=ckpt["student_base"]).to(dev)
     model.load_state_dict(ckpt["state_dict"])
