@@ -31,7 +31,7 @@ python -u generate_qualitative_fig.py \
     --epsilon 2.0 \
     --canal-seed 200 \
     --uniform-seed 200 \
-    --top 3
+    --top 1
 
 echo ""
 echo "--- BUSI (canal seed=400, uniform seed=400, eps=2.0) ---"
@@ -40,7 +40,7 @@ python -u generate_qualitative_fig.py \
     --epsilon 2.0 \
     --canal-seed 400 \
     --uniform-seed 400 \
-    --top 3
+    --top 1
 
 echo ""
 echo "--- ISIC (canal seed=200, uniform seed=200, eps=2.0, suffix=rerun3) ---"
@@ -50,7 +50,7 @@ python -u generate_qualitative_fig.py \
     --canal-seed 200 \
     --uniform-seed 200 \
     --suffix rerun3 \
-    --top 3
+    --top 1
 
 echo ""
 echo "Finished: $(date)"
