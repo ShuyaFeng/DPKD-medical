@@ -53,15 +53,16 @@ from drive_local_demo import (
     collect_caps, evaluate_vessel_dice, evaluate_metrics, summarize_metrics,
 )
 from synthetic_demo import (
-    eps_to_rho, uniform_sigma, clip_and_normalise, denormalise,
+    eps_to_rho, clip_and_normalise, denormalise,
 )
+from drive_pate_poc import correct_uniform_sigma
 from drive_student_distill import train_student_distill
 
 
 def masked_uniform_sigma(deltas, rho, active_mask):
     sigma = torch.zeros_like(deltas)
     if active_mask.any():
-        sigma[active_mask] = uniform_sigma(deltas[active_mask], rho)
+        sigma[active_mask] = correct_uniform_sigma(deltas[active_mask], rho)
     return sigma
 
 
@@ -205,7 +206,7 @@ def main():
                         else correct_waterfilling_sigma(deltas, importance, rho)
             else:
                 sigma = masked_uniform_sigma(deltas, rho, mask) if mask is not None \
-                        else uniform_sigma(deltas, rho)
+                        else correct_uniform_sigma(deltas, rho)
             cache = precompute(teacher, train_ds, caps, sigma, mask, device,
                                seed=42 + int(eps*10) + hash(tag) % 100)
             ml = run_students(train_ds, val_loader, cache, device, seeds, base_T)

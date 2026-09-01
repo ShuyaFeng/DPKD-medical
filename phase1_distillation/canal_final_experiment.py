@@ -15,6 +15,23 @@ Key fixes vs. prior experiments:
      the importance signal intact.
   3. Matches paper: eps in {1,2,4,8}, K=3, 5 seeds, top 10% channels.
 
+*** WARNING (2026-08-31 audit): the DP accounting below is NOT yet valid.
+  a) sens_imp = 2*clip_imp/N is unjustified: shared_importance (grad-energy)
+     enforces NO per-sample clip, and clip_imp is the p90 of the aggregate
+     importance — a data-dependent quantity, not a bound on any per-sample
+     contribution. A real clipped estimator (see shared_actnorm_importance_clipped
+     on the Emily branch) plus the teacher-level sensitivity
+     importance_sensitivity(clip, K, N) in drive_pate_canal_combined.py is
+     required (teachers are trained on the private data, so the correct bound
+     is (2*clip/K)*(1+(K-1)/N), not 2*clip/N).
+  b) privatize_caps' sens = 2*clip_caps/N is likewise invalid: caps are
+     0.9-quantiles (not clipped means) over cohorts of size N/K through
+     privately trained teachers, and clip_caps itself is measured from the
+     private data. A fixed public cap (or a bounded per-teacher release under
+     parallel composition) is needed.
+  Numbers from this script are honest in STRUCTURE (budget split, noisy-caps
+  clipping, noisy-importance selection) but not yet in sensitivity. ***
+
 Usage:
   python canal_final_experiment.py --dataset isic   --seeds 5 --te 60 --se 40
   python canal_final_experiment.py --dataset kvasir --seeds 5 --te 60 --se 40

@@ -111,23 +111,25 @@ def waterfilling_sigma(
     Closed-form channel-WF allocation.
 
     sigma_c = kappa * sqrt(delta_c) / s_c^{1/4}
-    kappa^2 = sum_c(delta_c * sqrt(s_c)) / rdp_budget
+    kappa^2 = sum_c(delta_c * sqrt(s_c)) / (2 * rdp_budget)
 
     Important channels (high s_c) → small sigma_c → less noise.
     Unimportant channels (low s_c) → large sigma_c → more noise.
+    [FIXED 2026-08-31: zCDP factor-of-2 was missing (sigma sqrt(2)x too large).]
     """
     s = importances.clamp(min=eps_s)
-    kappa = ((deltas * s.sqrt()).sum() / rdp_budget).sqrt()
+    kappa = ((deltas * s.sqrt()).sum() / (2.0 * rdp_budget)).sqrt()
     return kappa * deltas.sqrt() / s.pow(0.25)
 
 
 def uniform_sigma(deltas: torch.Tensor, rdp_budget: float) -> torch.Tensor:
     """
     Uniform allocation — same sigma for every channel.
-    sum_c (delta_c^2 / sigma^2) = rdp_budget
-    => sigma = sqrt(sum_c delta_c^2 / rdp_budget)
+    sum_c (delta_c^2 / (2 * sigma^2)) = rdp_budget
+    => sigma = sqrt(sum_c delta_c^2 / (2 * rdp_budget))
+    [FIXED 2026-08-31: zCDP factor-of-2 was missing (sigma sqrt(2)x too large).]
     """
-    sigma = (deltas.pow(2).sum() / rdp_budget).sqrt()
+    sigma = (deltas.pow(2).sum() / (2.0 * rdp_budget)).sqrt()
     return sigma.expand(deltas.shape[0]).clone()
 
 

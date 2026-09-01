@@ -14,7 +14,11 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).parent))
 from drive_pate_poc import correct_uniform_sigma
-from drive_pate_canal_combined import correct_waterfilling_sigma, add_dp_noise_to_importance
+from drive_pate_canal_combined import (
+    correct_waterfilling_sigma, add_dp_noise_to_importance,
+    importance_sensitivity,
+)
+from synthetic_demo import uniform_sigma, waterfilling_sigma
 
 
 def test_uniform_sigma_known_value():
@@ -106,6 +110,68 @@ def test_importance_noise_sigma_has_factor_of_two():
     )
 
 
+def test_legacy_sigma_functions_equal_correct_versions():
+    """synthetic_demo's uniform_sigma / waterfilling_sigma must be IDENTICAL
+    to the correct_ versions (the missing-/2 bug regression test).
+    Several local helper copies call the synthetic_demo versions, so any
+    drift here silently un-fixes the factor-of-2 bug."""
+    torch.manual_seed(7)
+    for _ in range(20):
+        deltas = torch.rand(12) + 0.05
+        imp = torch.rand(12) * 4 + 1e-6
+        rho = float(torch.rand(1)) * 3 + 0.01
+        assert torch.allclose(
+            uniform_sigma(deltas, rho), correct_uniform_sigma(deltas, rho),
+            rtol=1e-6,
+        ), "FAIL: synthetic_demo.uniform_sigma drifted from correct_uniform_sigma"
+        assert torch.allclose(
+            waterfilling_sigma(deltas, imp, rho),
+            correct_waterfilling_sigma(deltas, imp, rho), rtol=1e-6,
+        ), "FAIL: synthetic_demo.waterfilling_sigma drifted from correct_waterfilling_sigma"
+
+
+def test_masked_helper_copies_spend_exact_budget():
+    """Every masked/thresholded helper copy must spend exactly rho on the
+    active set and release nothing (sigma=0) off it."""
+    helpers = []
+    from drive_pate_pruning_joint import thresholded_uniform_sigma as h1
+    helpers.append(("drive_pate_pruning_joint", h1))
+    try:
+        from drive_pruning_ablation import masked_uniform_sigma as h2
+        helpers.append(("drive_pruning_ablation", h2))
+    except ImportError as e:
+        print("    [skip] drive_pruning_ablation: {}".format(e))
+    try:
+        from drive_per_teacher_importance import thresholded_uniform_sigma as h3
+        helpers.append(("drive_per_teacher_importance", h3))
+    except ImportError as e:
+        print("    [skip] drive_per_teacher_importance: {}".format(e))
+    deltas = torch.full((16,), 2.0 / 3.0)
+    mask = torch.zeros(16, dtype=torch.bool)
+    mask[[1, 5, 6, 12]] = True
+    rho = 0.7
+    for name, h in helpers:
+        sigma = h(deltas, rho, mask)
+        cost = (deltas[mask].pow(2) / (2.0 * sigma[mask].pow(2))).sum().item()
+        assert abs(cost - rho) < 1e-4, (
+            "FAIL {}: zCDP cost={:.6f} != rho={} (missing /2?)".format(name, cost, rho))
+        assert (sigma[~mask] == 0).all(), name
+
+
+def test_importance_sensitivity_teacher_level():
+    """Delta_imp = (2 clip / K) * (1 + (K-1)/N): teacher-level bound.
+    K=1 -> 2*clip (whole average can flip); N->inf -> 2*clip/K."""
+    clip = 100.0
+    assert abs(importance_sensitivity(clip, 1, 900) - 2 * clip) < 1e-9
+    assert abs(importance_sensitivity(clip, 10, 10**12) - 2 * clip / 10) < 1e-6
+    K, N = 10, 900
+    expect = (2 * clip / K) * (1 + (K - 1) / N)
+    assert abs(importance_sensitivity(clip, K, N) - expect) < 1e-9
+    # must never fall below either the old (invalid) 2*clip/N or 2*clip/K
+    assert importance_sensitivity(clip, K, N) >= 2 * clip / N
+    assert importance_sensitivity(clip, K, N) >= 2 * clip / K
+
+
 if __name__ == "__main__":
     tests = [
         test_uniform_sigma_known_value,
@@ -114,6 +180,9 @@ if __name__ == "__main__":
         test_waterfilling_sigma_equals_uniform_when_importance_uniform,
         test_waterfilling_sigma_zcdp_budget_satisfied,
         test_importance_noise_sigma_has_factor_of_two,
+        test_legacy_sigma_functions_equal_correct_versions,
+        test_masked_helper_copies_spend_exact_budget,
+        test_importance_sensitivity_teacher_level,
     ]
 
     failed = 0

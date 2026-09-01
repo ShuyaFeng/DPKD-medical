@@ -6,10 +6,18 @@ Budget split:
   rho_caps = f_caps * rho          (caps privatization, paid by both)
   rho_rel  = (1 - f_caps) * rho   (channel noise, same for both)
 
-Importance is computed cleanly and used internally by CANAL only to
-set per-channel noise levels via water-filling. It is never released,
-so it requires no privacy budget. Uniform ignores importance entirely
-and applies the same sigma to every channel.
+*** WARNING (2026-08-31 audit): NOT honest DP — do not report as DP results.
+The CANAL arm computes importance from the PRIVATE data and uses it unpaid.
+The claim "never released, so no budget" is incorrect: the per-channel noise
+scales sigma_c ARE data-dependent mechanism parameters observable from the
+released features, so the importance release must be charged (as
+canal_final_experiment.py does via rho_imp), and even then the sensitivity
+must be the teacher-level bound importance_sensitivity() in
+drive_pate_canal_combined.py, with a real per-sample clip enforced.
+Use this sweep only as a non-private diagnostic for choosing f_caps. ***
+
+Uniform ignores importance entirely and applies the same sigma to
+every channel.
 
 Usage:
     python canal_budget_sweep.py \\
