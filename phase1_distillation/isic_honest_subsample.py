@@ -6,6 +6,11 @@ Pay rho_imp for noisy importance (Gaussian mechanism with clipped per-sample
 contribution), then KEEP the top keep_frac channels by NOISY importance and
 drop the rest. Allocate uniform sigma over the kept channels using rho_rel.
 
+Sensitivity of the shared importance (FIXED 2026-08-31): teachers are trained
+on the private data, so Delta_imp = (2*clip/K) * (1 + (K-1)/N) (teacher-level
+bound via importance_sensitivity()), NOT the old 2*clip/N which held only for
+public/fixed teachers.
+
 Compared at each (K=10, eps):
   PATE+uniform_all       : all C channels, uniform sigma, rho_total for noise
   PATE+subsample_honest  : top-keep_frac by NOISY importance, uniform on kept;
@@ -42,7 +47,7 @@ from drive_pate_pruning_joint import (
     thresholded_uniform_sigma, precompute_joint_cache,
 )
 from drive_pate_canal_combined import (
-    correct_waterfilling_sigma, correct_uniform_sigma,
+    correct_waterfilling_sigma, correct_uniform_sigma, importance_sensitivity,
 )
 from drive_student_distill import train_student_distill
 from synthetic_demo import eps_to_rho
@@ -100,7 +105,9 @@ def add_dp_noise_to_importance(imp, sensitivity, rho_imp, device, seed):
     sigma_imp = sensitivity / math.sqrt(2.0 * rho_imp)
     g = torch.Generator(); g.manual_seed(int(seed))
     noise = torch.randn(imp.shape, generator=g) * sigma_imp
-    noisy = (imp + noise).clamp(min=1e-6)
+    # clamp at 1e-12 (not 1e-6): keeps s^{1/4} well-defined downstream
+    # without biasing the sigma allocation for tiny-importance channels
+    noisy = (imp + noise).clamp(min=1e-12)
     return noisy.to(device), sigma_imp
 
 
@@ -170,7 +177,9 @@ def main():
         teachers, imp_loader, device, clip=args.clip_imp,
     )
     R_clipped = (imp_clipped.max() / imp_clipped.min()).item()
-    sensitivity = 2.0 * args.clip_imp / N_per_teacher
+    # Teacher-level replace-one sensitivity (teachers trained on private data;
+    # the old 2*clip/N held only for public/fixed teachers) — FIXED 2026-08-31
+    sensitivity = importance_sensitivity(args.clip_imp, args.K, N_per_teacher)
     print(f"  R_clipped={R_clipped:.2f}  sensitivity={sensitivity:.6f}  "
           f"per_sample_L2 mean={diag['per_sample_l2_mean']:.1f} max={diag['per_sample_l2_max']:.1f}")
     cleanup(device)

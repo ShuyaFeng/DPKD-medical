@@ -85,15 +85,17 @@ def waterfilling_sigma(
     """
     Channel-WF: sigma_c = kappa * sqrt(delta_c) / s_c^{1/4}.
     Important channels (high s_c) get less noise.
+    [FIXED 2026-08-31: zCDP factor-of-2 was missing (sigma sqrt(2)x too large).]
     """
     s = importances.clamp(min=eps_s)
-    kappa = ((deltas * s.sqrt()).sum() / rdp_budget).sqrt()
+    kappa = ((deltas * s.sqrt()).sum() / (2.0 * rdp_budget)).sqrt()
     return kappa * deltas.sqrt() / s.pow(0.25)
 
 
 def uniform_sigma(deltas: torch.Tensor, rdp_budget: float) -> torch.Tensor:
-    """Uniform: same sigma for all channels."""
-    sigma = (deltas.pow(2).sum() / rdp_budget).sqrt()
+    """Uniform: same sigma for all channels.
+    [FIXED 2026-08-31: zCDP factor-of-2 was missing (sigma sqrt(2)x too large).]"""
+    sigma = (deltas.pow(2).sum() / (2.0 * rdp_budget)).sqrt()
     return sigma.expand(deltas.shape[0]).clone()
 
 

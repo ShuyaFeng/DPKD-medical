@@ -12,7 +12,11 @@ For a fixed K (default 10), at 7 epsilons, compares 3 methods:
 Honest accounting:
   rho_total = rho_imp + rho_rel    (alpha = rho_imp / rho_total, default 0.1)
   per-sample L2-clipped to <= clip (default 100)
-  per-record sensitivity Delta_imp = 2 * clip / N_per_teacher
+  replace-one sensitivity Delta_imp = (2*clip/K) * (1 + (K-1)/N)
+    (teacher-level bound: teachers are trained on the private data, so one
+     record retrains one teacher and moves that teacher's whole clipped
+     average by up to 2*clip; the old 2*clip/N held only for public/fixed
+     teachers. FIXED 2026-08-31 — see importance_sensitivity().)
   sigma_imp = Delta_imp / sqrt(2 * rho_imp)
   shared_imp_noisy = clipped_shared_imp + Gaussian(sigma_imp)   [clamped > 0]
   sigma_canal = waterfilling(deltas, shared_imp_noisy, rho_rel)
@@ -40,7 +44,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from isic_dataset import ISICDataset
 from drive_local_demo import TinyUNet, evaluate_vessel_dice, compute_importance_actnorm
 from drive_pate_poc import train_K_teachers, correct_uniform_sigma, precompute_pate_cache
-from drive_pate_canal_combined import correct_waterfilling_sigma
+from drive_pate_canal_combined import correct_waterfilling_sigma, importance_sensitivity
 from drive_student_distill import train_student_distill
 from synthetic_demo import eps_to_rho
 
@@ -104,7 +108,9 @@ def add_dp_noise_to_importance(imp, sensitivity, rho_imp, device, seed):
     gen = torch.Generator()
     gen.manual_seed(seed)
     noise = torch.randn(imp.shape, generator=gen) * sigma_imp
-    noisy = (imp + noise).clamp(min=1e-6)
+    # clamp at 1e-12 (not 1e-6): keeps s^{1/4} well-defined downstream
+    # without biasing the sigma allocation for tiny-importance channels
+    noisy = (imp + noise).clamp(min=1e-12)
     return noisy.to(device), sigma_imp
 
 
@@ -162,7 +168,8 @@ def main():
         teachers, imp_loader, device, clip=args.clip_imp,
     )
     R_clipped = (imp_clipped.max() / imp_clipped.min()).item()
-    sensitivity = 2.0 * args.clip_imp / N_per_teacher
+    # Teacher-level replace-one sensitivity (teachers trained on private data)
+    sensitivity = importance_sensitivity(args.clip_imp, args.K, N_per_teacher)
     print(f"  R_clipped = {R_clipped:.2f}  (clip={args.clip_imp}, "
           f"obs per-sample L2 max={diag['per_sample_l2_max']:.2f} "
           f"mean={diag['per_sample_l2_mean']:.2f})")

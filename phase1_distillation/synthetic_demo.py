@@ -177,13 +177,22 @@ def eps_to_rho(eps: float, delta: float = 1e-5) -> float:
 
 
 def waterfilling_sigma(deltas, importances, rdp_budget, eps_s: float = 1e-12):
+    """WF sigma under zCDP: minimise sum_c s_c*sigma_c^2 s.t.
+    sum_c Delta_c^2/(2*sigma_c^2) = rho.  Optimum sigma_c = kappa*sqrt(Delta_c)/s_c^{1/4},
+    kappa = sqrt(sum_c Delta_c*sqrt(s_c) / (2*rho)).
+    [FIXED 2026-08-31: was missing the factor-of-2, giving sigma sqrt(2)x too large.
+    Now identical to correct_waterfilling_sigma in drive_pate_canal_combined.py.]"""
     s = importances.clamp(min=eps_s)
-    kappa = ((deltas * s.sqrt()).sum() / rdp_budget).sqrt()
+    kappa = ((deltas * s.sqrt()).sum() / (2.0 * rdp_budget)).sqrt()
     return kappa * deltas.sqrt() / s.pow(0.25)
 
 
 def uniform_sigma(deltas, rdp_budget):
-    sigma = (deltas.pow(2).sum() / rdp_budget).sqrt()
+    """Uniform sigma under zCDP: sum_c Delta_c^2/(2*sigma^2) = rho
+    => sigma = sqrt(sum_c Delta_c^2 / (2*rho)).
+    [FIXED 2026-08-31: was missing the factor-of-2, giving sigma sqrt(2)x too large.
+    Now identical to correct_uniform_sigma in drive_pate_poc.py.]"""
+    sigma = (deltas.pow(2).sum() / (2.0 * rdp_budget)).sqrt()
     return sigma.expand(deltas.shape[0]).clone()
 
 

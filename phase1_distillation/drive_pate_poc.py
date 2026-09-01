@@ -40,8 +40,9 @@ def correct_uniform_sigma(deltas: torch.Tensor, rho: float) -> torch.Tensor:
     """
     Uniform σ with the CORRECT factor-of-2 in zCDP.
       Σ Δ_c²/(2σ²) = ρ  →  σ = √(Σ Δ_c² / (2ρ))
-    (synthetic_demo's uniform_sigma is missing the /2 — we use the right
-    formula here for honest absolute σ numbers.)
+    (synthetic_demo's uniform_sigma had the /2 missing until 2026-08-31;
+    it is now fixed and identical to this function. Kept here as the
+    canonical version — test_sigma.py asserts the two stay in sync.)
     """
     sigma_val = (deltas.pow(2).sum() / (2.0 * rho)).sqrt()
     return sigma_val.expand(deltas.shape[0]).clone()

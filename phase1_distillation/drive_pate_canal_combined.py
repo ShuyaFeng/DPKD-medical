@@ -43,6 +43,26 @@ def correct_waterfilling_sigma(deltas, importance, rho):
     return kappa * deltas.sqrt() / s.pow(0.25)
 
 
+def importance_sensitivity(clip, K, N):
+    """Replace-one L2 sensitivity of the shared importance vector
+    shared = (1/K) * sum_k imp_k, where imp_k is teacher k's average of
+    per-sample vectors each L2-clipped to <= clip, computed over N samples.
+
+    Teachers are TRAINED ON THE PRIVATE DATA, so replacing sample j:
+      - retrains teacher k(j): imp_{k(j)} and imp'_{k(j)} both lie in the
+        L2 ball of radius clip (averages of clipped vectors), so that term
+        moves by at most 2*clip;
+      - for the other K-1 teachers the model is unchanged and only sample
+        j's own clipped contribution moves: at most 2*clip/N each.
+    Total: (1/K) * [2*clip + (K-1)*2*clip/N] = (2*clip/K) * (1 + (K-1)/N).
+
+    NOTE: the previously used 2*clip/N is valid ONLY for public/fixed
+    teachers; with privately trained teachers it understates sensitivity
+    by a factor ~N/K. [FIXED 2026-08-31]
+    """
+    return (2.0 * clip / float(K)) * (1.0 + (K - 1.0) / float(N))
+
+
 def compute_teacher_importance(teacher, subset_indices, train_ds, device):
     """Compute per-channel importance for teacher_k on its own cohort.
     Temporarily enables grad on the (post-train, frozen) teacher params."""
