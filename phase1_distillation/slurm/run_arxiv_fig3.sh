@@ -25,9 +25,10 @@ fi
 cd /home/ab36/DPKD-medical/phase1_distillation
 
 python -u isic_K_eps_sweep.py \
-    --Ks "1,3,5,10" \
-    --seeds 5 \
+    --Ks "1,3,5,10,16" \
+    --seeds 3 \
     --epsilons "8" \
+    --methods "uniform" \
     --te 50 --se 40 \
     --out_tag "arxiv"
 
