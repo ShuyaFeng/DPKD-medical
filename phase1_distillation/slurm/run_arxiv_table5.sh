@@ -9,7 +9,7 @@
 #SBATCH --error=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/arxiv_table5_%j.err
 
 echo "=========================================="
-echo "ArXiv rerun — Table 5 (importance measure ablation)"
+echo "ArXiv rerun — Table 3 (importance measure ablation, 5 seeds)"
 echo "Job ID: $SLURM_JOB_ID  Node: $(hostname)  Start: $(date)"
 echo "=========================================="
 
@@ -26,7 +26,7 @@ cd /home/ab36/DPKD-medical/phase1_distillation
 
 python -u isic_gradenergy_vs_actnorm.py \
     --K 10 \
-    --seeds 3 \
+    --seeds 5 \
     --epsilons "2,4,8" \
     --te 50 --se 40 \
     --out_tag "arxiv"
