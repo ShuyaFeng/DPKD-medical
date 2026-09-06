@@ -43,12 +43,12 @@ python -u generate_qualitative_fig.py \
     --top 1
 
 echo ""
-echo "--- ISIC (canal seed=200, uniform seed=200, eps=2.0) ---"
+echo "--- ISIC (canal seed=300, uniform seed=300, eps=2.0) ---"
 python -u generate_qualitative_fig.py \
     --dataset isic \
     --epsilon 2.0 \
-    --canal-seed 200 \
-    --uniform-seed 200 \
+    --canal-seed 300 \
+    --uniform-seed 300 \
     --top 1
 
 echo ""
