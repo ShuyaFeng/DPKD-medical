@@ -52,7 +52,7 @@ from torch.utils.data import DataLoader, Subset
 sys.path.insert(0, str(Path(__file__).parent))
 from drive_pate_poc import train_K_teachers, correct_uniform_sigma, partition_dataset
 from drive_pate_pruning_joint import shared_importance, precompute_joint_cache
-from drive_pate_canal_combined import add_dp_noise_to_importance, correct_waterfilling_sigma
+from drive_pate_canal_combined import add_dp_noise_to_importance, correct_waterfilling_sigma, importance_sensitivity
 from drive_student_distill import train_student_distill
 from synthetic_demo import eps_to_rho
 
@@ -192,7 +192,7 @@ def main():
     # clip_imp = 90th percentile of actual importance values — correctly calibrated
     # (prior bug: clip was 576x too large because H×W normalisation was missing)
     clip_imp = float(torch.quantile(imp_cpu, 0.90))
-    sens_imp = 2.0 * clip_imp / float(N)
+    sens_imp = importance_sensitivity(clip_imp, K, N)
     print(f"  importance: mean={float(imp_cpu.mean()):.4e}  max={float(imp_cpu.max()):.4e}  "
           f"p90={clip_imp:.4e}  sens_imp={sens_imp:.4e}")
 
