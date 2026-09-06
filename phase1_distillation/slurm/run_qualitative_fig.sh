@@ -25,31 +25,30 @@ fi
 cd /home/ab36/DPKD-medical/phase1_distillation
 
 echo ""
-echo "--- Kvasir (canal seed=200, uniform seed=200, eps=2.0) ---"
+echo "--- Kvasir (canal seed=200, uniform seed=200, eps=1.0) ---"
 python -u generate_qualitative_fig.py \
     --dataset kvasir \
-    --epsilon 2.0 \
+    --epsilon 1.0 \
     --canal-seed 200 \
     --uniform-seed 200 \
     --top 1
 
 echo ""
-echo "--- BUSI (canal seed=400, uniform seed=400, eps=2.0) ---"
+echo "--- BUSI (canal seed=400, uniform seed=400, eps=1.0) ---"
 python -u generate_qualitative_fig.py \
     --dataset busi \
-    --epsilon 2.0 \
+    --epsilon 1.0 \
     --canal-seed 400 \
     --uniform-seed 400 \
     --top 1
 
 echo ""
-echo "--- ISIC (canal seed=200, uniform seed=200, eps=2.0, suffix=rerun3) ---"
+echo "--- ISIC (canal seed=200, uniform seed=200, eps=8.0) ---"
 python -u generate_qualitative_fig.py \
     --dataset isic \
-    --epsilon 2.0 \
+    --epsilon 8.0 \
     --canal-seed 200 \
     --uniform-seed 200 \
-    --suffix rerun3 \
     --top 1
 
 echo ""
