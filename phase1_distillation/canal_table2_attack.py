@@ -6,9 +6,10 @@ epsilon in {2, 8}, Emily's corrected importance sensitivity (teacher-level formu
 
 Attacks:
   MIA   — nearest-neighbour distance in active-channel feature space (200 noise trials).
-  Recon — decoder trained on clean full-channel features; SSIM measured on
-          masked+noisy released features at each epsilon.
+  Recon — decoder trained on clean MASKED features (active channels only, inactive zeroed);
+          SSIM measured on masked+noisy released features at each epsilon.
 
+No-noise baseline included: proves the leak exists without DP (MIA AUC=1.0, SSIM high).
 Both attacks run for uniform and CANAL (water-filling) sigma at each epsilon.
 """
 
@@ -116,6 +117,18 @@ def get_ds(name, split):
     raise ValueError(f"Unknown dataset: {name}")
 
 
+def compute_ssim_mean(Xn, xh, in_ch):
+    vals = []
+    for i in range(len(Xn)):
+        a, b = Xn[i], xh[i]
+        if in_ch == 1:
+            s = ssim(a[..., 0], b[..., 0], data_range=1.0)
+        else:
+            s = ssim(a, b, channel_axis=2, data_range=1.0)
+        vals.append(s)
+    return float(np.mean(vals))
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -154,43 +167,69 @@ def main():
     # --- Calibrate clip_caps from per-sample feature norms ---
     print("Measuring per-sample cap norms...")
     clip_caps_avg, clip_caps_p99 = measure_per_sample_cap_norms(teachers, train_ds, device)
-    clip_caps = clip_caps_avg   # conservative average (matches canal_final_experiment.py)
+    clip_caps = clip_caps_avg
     print(f"  clip_caps avg={clip_caps_avg:.4e}  p99={clip_caps_p99:.4e}  using avg")
 
-    # --- Compute importance with Emily's corrected sensitivity ---
+    # --- Compute importance with corrected sensitivity ---
     print("Computing channel importance...")
     train_loader = DataLoader(train_ds, batch_size=8, shuffle=False)
     importance   = shared_importance(teachers, train_loader, device).to(device)
     imp_cpu      = importance.cpu()
-    clip_imp     = float(torch.quantile(imp_cpu, 0.90))          # 90th percentile (matches Table 1)
-    sens_imp     = importance_sensitivity(clip_imp, K, N)        # corrected teacher-level sensitivity
+    clip_imp     = float(torch.quantile(imp_cpu, 0.90))
+    sens_imp     = importance_sensitivity(clip_imp, K, N)
     print(f"  mean={float(imp_cpu.mean()):.4e}  p90={clip_imp:.4e}  sens_imp={sens_imp:.4e}")
 
-    # --- Reference features (attacker has teacher → computes clean features) ---
+    # --- Channel mask from CLEAN (non-privatized) importance ---
+    # Used for decoder training and attack evaluation (worst-case: attacker knows the mask).
+    clean_rank        = torch.argsort(importance, descending=True)
+    clean_top_indices = clean_rank[:n_keep]
+    clean_top_mask    = torch.zeros(Cb, dtype=torch.bool, device=device)
+    clean_top_mask[clean_top_indices] = True
+    clean_act_idx     = clean_top_indices.cpu().numpy()
+    print(f"  Clean channel mask: {n_keep} active channels")
+
+    # --- Reference features (clean, mean of K teachers) ---
     print("Computing reference features (clean, all channels)...")
-    Fm_all = agg_feats(teachers, caps_list, train_ds, device)    # (N,      C, H, W)
-    Fn_all = agg_feats(teachers, caps_list, val_ds,   device)    # (N_val,  C, H, W)
+    Fm_all = agg_feats(teachers, caps_list, train_ds, device)    # (N, C, H, W)
+    Fn_all = agg_feats(teachers, caps_list, val_ds,   device)
     H, W   = Fm_all.shape[2], Fm_all.shape[3]
 
-    # Cap sample count to bound peak memory for MIA distance computation
     N_m = min(N, args.n_eval)
     N_n = min(len(val_ds), args.n_eval)
-    Fm  = Fm_all[:N_m]   # MIA members
-    Fn  = Fn_all[:N_n]   # MIA non-members
-    print(f"  MIA: {N_m} members / {N_n} non-members  spatial H={H} W={W}")
+    Fm  = Fm_all[:N_m]
+    Fn  = Fn_all[:N_n]
+    print(f"  MIA: {N_m} members / {N_n} non-members  H={H} W={W}")
 
-    # --- Train reconstruction decoder ONCE on clean, full-channel features ---
-    print("Training reconstruction decoder (400 iters, full channels, clean)...")
-    Fm_dev   = Fm_all.to(device)
+    # MIA feature matrices: clean active channels only, flattened
+    Fm_a = Fm[:, clean_act_idx].reshape(N_m, -1).numpy().astype(np.float32)
+    Fn_a = Fn[:, clean_act_idx].reshape(N_n, -1).numpy().astype(np.float32)
+
+    # Masked features: inactive channels zeroed (same input the decoder sees at test time)
+    Fm_dev    = Fm_all.to(device)
+    Fm_masked = Fm_dev * clean_top_mask.float().view(1, Cb, 1, 1)
+
+    # --- Train reconstruction decoder ONCE on masked clean features ---
+    print("Training reconstruction decoder (400 iters, masked channels, clean)...")
     imgs_all = torch.cat([x for x, _ in DataLoader(train_ds, batch_size=4)]).to(device)
     dec = Recon(Cb, out_ch=in_ch).to(device)
     opt = torch.optim.Adam(dec.parameters(), lr=2e-3)
     for _ in range(400):
         opt.zero_grad()
-        loss = ((dec(Fm_dev) - imgs_all) ** 2).mean()
+        loss = ((dec(Fm_masked) - imgs_all) ** 2).mean()
         loss.backward()
         opt.step()
     Xn = imgs_all.cpu().numpy().transpose(0, 2, 3, 1)   # (N, H, W, C)
+    print(f"  Decoder trained  final MSE={loss.item():.5f}")
+
+    # --- No-noise baselines (prove the leak exists without DP) ---
+    print("\nComputing no-noise baselines...")
+    # MIA no-noise: released features == member features exactly → AUC = 1.0
+    print(f"  No-noise MIA AUC = 1.000  (by construction: rel=Fm, every member self-matches)")
+    # Reconstruction no-noise: decoder on clean masked features
+    with torch.no_grad():
+        xh_nn = dec(Fm_masked).clamp(0, 1).cpu().numpy().transpose(0, 2, 3, 1)
+    ssim_nn = compute_ssim_mean(Xn, xh_nn, in_ch)
+    print(f"  No-noise Recon SSIM = {ssim_nn:.3f}  (sanity: high = leak exists without DP)")
 
     results = {
         "dataset": args.dataset, "K": K,
@@ -199,6 +238,11 @@ def main():
         "clip_caps_avg": clip_caps_avg, "clip_caps_p99": clip_caps_p99,
         "clip_imp": clip_imp, "sens_imp": sens_imp,
         "epsilons": EPS,
+        "no_noise": {
+            "mia_auc":           1.0,
+            "mia_tpr_at_fpr0.1": 1.0,
+            "recon_ssim":        ssim_nn,
+        },
         "sweep": {},
     }
 
@@ -212,43 +256,32 @@ def main():
         rho_rel  = FR * rho
         print(f"\n{'='*64}\neps={eps}  rho_caps={rho_caps:.5f}  rho_imp={rho_imp:.5f}  rho_rel={rho_rel:.4f}")
 
-        # Per-epsilon privatized caps and importance
+        # Per-epsilon privatized caps and importance (for sigma computation only)
         caps_noisy = privatize_caps(caps_list, clip_caps, N, rho_caps,
                                     seed=int(eps * 100))
         imp_noisy  = add_dp_noise_to_importance(importance, sens_imp, rho_imp,
                                                 seed=int(eps * 100) + 7)
 
-        # Channel selection: top KEEP_FRAC by noisy importance
-        rank_desc   = torch.argsort(imp_noisy, descending=True)
-        top_indices = rank_desc[:n_keep]
-        top_mask    = torch.zeros(Cb, dtype=torch.bool, device=device)
-        top_mask[top_indices] = True
-        act_idx     = top_indices.cpu().numpy()                  # (n_keep,)
-
-        # Per-channel sigmas for uniform and CANAL
+        # Per-channel sigmas on clean-mask channels
         sigma_uni = torch.zeros(Cb, device=device)
-        sigma_uni[top_mask] = correct_uniform_sigma(deltas[top_mask], rho_rel)
+        sigma_uni[clean_top_mask] = correct_uniform_sigma(deltas[clean_top_mask], rho_rel)
 
         sigma_wf = torch.zeros(Cb, device=device)
-        sigma_wf[top_mask] = correct_waterfilling_sigma(
-            deltas[top_mask], imp_noisy[top_mask], rho_rel
+        sigma_wf[clean_top_mask] = correct_waterfilling_sigma(
+            deltas[clean_top_mask], imp_noisy[clean_top_mask], rho_rel
         )
 
-        sig_uni_mean = sigma_uni[top_mask].mean().item()
-        sig_wf_mean  = sigma_wf[top_mask].mean().item()
+        sig_uni_mean = sigma_uni[clean_top_mask].mean().item()
+        sig_wf_mean  = sigma_wf[clean_top_mask].mean().item()
         print(f"  sigma_uni active_mean={sig_uni_mean:.4f}")
         print(f"  sigma_wf  active_mean={sig_wf_mean:.4f}  "
-              f"range=[{sigma_wf[top_mask].min():.4f}, {sigma_wf[top_mask].max():.4f}]")
+              f"range=[{sigma_wf[clean_top_mask].min():.4f}, {sigma_wf[clean_top_mask].max():.4f}]")
 
-        # Active-channel feature matrices for MIA (float32 to bound memory)
-        Fm_a = Fm[:, act_idx].reshape(N_m, -1).numpy().astype(np.float32)
-        Fn_a = Fn[:, act_idx].reshape(N_n, -1).numpy().astype(np.float32)
-
-        # Per-position sigma vectors (n_keep * H * W,)
-        sig_uni_scalar  = float(sigma_uni[top_mask][0].item())
-        sig_wf_per_ch   = sigma_wf[act_idx].cpu().numpy().astype(np.float32)   # (n_keep,)
+        # Spatial sigma vectors for MIA (n_keep * H * W,)
+        sig_uni_scalar  = float(sigma_uni[clean_top_mask][0].item())
+        sig_wf_per_ch   = sigma_wf[clean_act_idx].cpu().numpy().astype(np.float32)
         sig_uni_spatial = np.full(n_keep * H * W, sig_uni_scalar, dtype=np.float32)
-        sig_wf_spatial  = np.repeat(sig_wf_per_ch, H * W)                      # (n_keep*H*W,)
+        sig_wf_spatial  = np.repeat(sig_wf_per_ch, H * W)
 
         ep_res = {"rho_caps": rho_caps, "rho_imp": rho_imp, "rho_rel": rho_rel,
                   "sigma_uni_active_mean": sig_uni_mean,
@@ -261,9 +294,7 @@ def main():
             for _ in range(N_TRIAL):
                 noise = rng.standard_normal(Fm_a.shape).astype(np.float32) * sig_spatial[None, :]
                 rel   = Fm_a + noise
-                # d_m[j] = min_i ||rel[i] - Fm_a[j]||^2  (how well member j is matched)
                 d_m   = ((rel[:, None] - Fm_a[None]) ** 2).sum(-1).min(axis=0)
-                # d_n[j] = min_i ||rel[i] - Fn_a[j]||^2  (how well non-member j is matched)
                 d_n   = ((rel[:, None] - Fn_a[None]) ** 2).sum(-1).min(axis=0)
                 s_m, s_n = -d_m, -d_n
                 aucs.append(auc_mw(s_m, s_n))
@@ -275,27 +306,16 @@ def main():
             print(f"           {label:>9}  {np.mean(aucs):>6.3f}  {np.mean(tprs):>10.3f}")
 
         # ── Reconstruction attack ─────────────────────────────────────────────
-        # Decoder sees: active-channel clean features + per-channel noise
         print(f"\n[Recon eps={eps}]  {'config':>9}  {'SSIM':>6}")
-        Fm_masked = Fm_dev * top_mask.float().view(1, Cb, 1, 1)   # inactive → 0
 
         for i_label, (label, sigma_per_ch) in enumerate([("uniform", sigma_uni), ("canal", sigma_wf)]):
-            torch.manual_seed(int(eps * 100) + i_label)   # same noise realization per method
+            torch.manual_seed(int(eps * 100) + i_label)
             noise = torch.zeros_like(Fm_dev)
-            # sigma_per_ch[top_mask]: (n_keep,) → broadcast to (1, n_keep, 1, 1)
-            sig_active = sigma_per_ch[top_mask].view(1, -1, 1, 1)
-            noise[:, top_mask] = torch.randn_like(Fm_dev[:, top_mask]) * sig_active
+            sig_active = sigma_per_ch[clean_top_mask].view(1, -1, 1, 1)
+            noise[:, clean_top_mask] = torch.randn_like(Fm_dev[:, clean_top_mask]) * sig_active
             with torch.no_grad():
                 xh = dec(Fm_masked + noise).clamp(0, 1).cpu().numpy().transpose(0, 2, 3, 1)
-            ssim_vals = []
-            for i in range(len(Xn)):
-                a, b = Xn[i], xh[i]
-                if in_ch == 1:
-                    s = ssim(a[..., 0], b[..., 0], data_range=1.0)
-                else:
-                    s = ssim(a, b, channel_axis=2, data_range=1.0)
-                ssim_vals.append(s)
-            ss = float(np.mean(ssim_vals))
+            ss = compute_ssim_mean(Xn, xh, in_ch)
             ep_res[f"recon_{label}"] = {"ssim": ss}
             print(f"            {label:>9}  {ss:>6.3f}")
 
@@ -304,11 +324,13 @@ def main():
     # --- Summary table ---
     print(f"\n{'='*72}")
     print(f"TABLE 2  ({args.dataset.upper()})  K={K}  fc={FC}/fi={FI}/fr={FR}")
-    print(f"  {'eps':>5}  {'MI-AUC-uni':>11}  {'MI-AUC-canal':>13}  "
+    print(f"  {'config':>10}  {'MI-AUC-uni':>11}  {'MI-AUC-canal':>13}  "
           f"{'SSIM-uni':>9}  {'SSIM-canal':>10}")
+    print(f"  {'no-noise':>10}  {'1.000':>11}  {'1.000':>13}  "
+          f"{results['no_noise']['recon_ssim']:>9.3f}  {'(same)':>10}")
     for eps in EPS:
         r = results["sweep"][str(eps)]
-        print(f"  {eps:5.1f}  "
+        print(f"  {eps:>10.1f}  "
               f"{r['mia_uniform']['auc']:>11.3f}  "
               f"{r['mia_canal']['auc']:>13.3f}  "
               f"{r['recon_uniform']['ssim']:>9.3f}  "
