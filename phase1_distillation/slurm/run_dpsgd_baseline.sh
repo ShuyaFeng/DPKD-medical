@@ -10,7 +10,7 @@ for DS in $DATASETS; do
     sbatch <<SLURM
 #!/bin/bash
 #SBATCH --job-name=dpsgd_${DS}
-#SBATCH --partition=amperenodes-medium
+#SBATCH --partition=pascalnodes
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
