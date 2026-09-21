@@ -14,7 +14,7 @@ for DS in $DATASETS; do
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=0-14:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/dpsgd_${DS}_%j.out
 #SBATCH --error=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/dpsgd_${DS}_%j.err
 
