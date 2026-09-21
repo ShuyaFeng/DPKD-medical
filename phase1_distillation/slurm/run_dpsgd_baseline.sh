@@ -10,11 +10,11 @@ for DS in $DATASETS; do
     sbatch <<SLURM
 #!/bin/bash
 #SBATCH --job-name=dpsgd_${DS}
-#SBATCH --partition=pascalnodes-medium
+#SBATCH --partition=pascalnodes
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=2-00:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/dpsgd_${DS}_%j.out
 #SBATCH --error=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/dpsgd_${DS}_%j.err
 
