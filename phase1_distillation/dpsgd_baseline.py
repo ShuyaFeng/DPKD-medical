@@ -46,10 +46,16 @@ EPSILONS = [1.0, 2.0, 4.0, 8.0]
 SEEDS    = [100, 200, 300, 400, 500]
 DELTA    = 1e-5
 
-# Hyperparameters — same training budget as CANAL for a fair wall-clock comparison.
-# max_grad_norm=0.5 (clipping threshold C in Algorithm 1) and lr/bs match what
-# CANAL's student sees in terms of update magnitude.
-CFG = dict(epochs=200, bs=20, lr=0.05, max_grad_norm=0.5)
+# Per-dataset hyperparameters following Abadi 2016 Section 3.3:
+#   bs = √N (paper recommendation for lot size)
+#   max_grad_norm = median of unclipped gradient norms (measured via measure_grad_norms.py)
+#   lr = 0.05 (paper Section 3.3: accuracy peaks at 0.05)
+#   epochs = 200 (same as CANAL for fair comparison)
+DATASET_CFG = {
+    "isic":   dict(epochs=200, bs=45, lr=0.05, max_grad_norm=4.86),
+    "kvasir": dict(epochs=200, bs=28, lr=0.05, max_grad_norm=3.46),
+    "busi":   dict(epochs=200, bs=23, lr=0.05, max_grad_norm=2.28),
+}
 
 
 def get_dataset(name, split):
@@ -138,7 +144,7 @@ def main():
 
     epsilons = [8.0] if args.smoke else EPSILONS
     seeds    = [100]  if args.smoke else SEEDS
-    cfg = dict(CFG)
+    cfg = dict(DATASET_CFG[args.dataset])
     if args.smoke:
         cfg["epochs"] = 10
 
