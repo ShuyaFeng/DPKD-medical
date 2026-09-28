@@ -6,7 +6,11 @@
 #    its own grid search job (Slurm dependency).
 #
 # Usage (from phase1_distillation/):
-#   bash slurm/run_dpsgd_all.sh
+#   bash slurm/run_dpsgd_all.sh              # all three datasets
+#   bash slurm/run_dpsgd_all.sh isic kvasir  # skip busi (already running)
+#   bash slurm/run_dpsgd_all.sh isic         # single dataset
+
+DATASETS=${@:-"busi isic kvasir"}
 
 set -e
 
@@ -84,21 +88,19 @@ echo "Finished: \$(date)"
 SLURM
 }
 
-# ── BUSI: grid search already done, submit baseline directly ──────────────────
-BUSI_BASE=$(submit_baseline busi "")
-echo "Submitted dpsgd_busi baseline: job ${BUSI_BASE} (uses existing grid search result)"
-
-# ── ISIC: grid search first, then baseline ────────────────────────────────────
-ISIC_GRID=$(submit_grid isic)
-echo "Submitted dpsgd_grid_isic: job ${ISIC_GRID}"
-ISIC_BASE=$(submit_baseline isic "$ISIC_GRID")
-echo "Submitted dpsgd_isic baseline: job ${ISIC_BASE} (starts after job ${ISIC_GRID})"
-
-# ── Kvasir: grid search first, then baseline ─────────────────────────────────
-KVASIR_GRID=$(submit_grid kvasir)
-echo "Submitted dpsgd_grid_kvasir: job ${KVASIR_GRID}"
-KVASIR_BASE=$(submit_baseline kvasir "$KVASIR_GRID")
-echo "Submitted dpsgd_kvasir baseline: job ${KVASIR_BASE} (starts after job ${KVASIR_GRID})"
+for DS in $DATASETS; do
+    if [[ "$DS" == "busi" ]]; then
+        # BUSI grid search already done — submit baseline directly
+        JOB=$(submit_baseline busi "")
+        echo "Submitted dpsgd_busi baseline: job ${JOB} (uses existing grid search result)"
+    else
+        # ISIC / Kvasir — grid search first, baseline chained after
+        GRID_JOB=$(submit_grid "$DS")
+        echo "Submitted dpsgd_grid_${DS}: job ${GRID_JOB}"
+        BASE_JOB=$(submit_baseline "$DS" "$GRID_JOB")
+        echo "Submitted dpsgd_${DS} baseline: job ${BASE_JOB} (starts after job ${GRID_JOB})"
+    fi
+done
 
 echo ""
 echo "All jobs submitted. Monitor with: squeue -u \$USER"
