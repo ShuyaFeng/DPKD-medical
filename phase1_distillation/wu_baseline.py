@@ -213,68 +213,85 @@ def student_loss(logit_s, feat_s, y, logit_t_noisy, feat_t_noisy,
 # Training routines
 # =============================================================================
 
+def _collect_features(teacher, loader, device):
+    """Extract all bottleneck features from a loader (no grad)."""
+    feats = []
+    teacher.eval()
+    with torch.no_grad():
+        for x, _ in loader:
+            f, _ = teacher.get_features_and_logits(x.to(device))
+            feats.append(f)
+    return torch.cat(feats, dim=0)   # (N, 64, 24, 24)
+
+
 def train_teacher(teacher, mia, train_loader, val_loader, device, lam_adv):
     """
-    Algorithm 2 — MIA adversarial training.
+    Algorithm 2 — faithful implementation (Wu et al. 2025).
 
-    Phase 1 (epochs 0-1, warmup):
-      - Teacher: task loss only.
-      - MIA: BCE on train features (member=1) and val features (non-member=0).
-    Phase 2 (epochs 2..TEACHER_EPOCHS-1):
-      - MIA frozen.
-      - Teacher: L_task + lam_adv * L_adv, where L_adv pushes teacher features
-        toward the non-member distribution (adversarial against MIA).
+    Every epoch (lines 8-14): teacher updated with L = L_task + λ_adv·L_adv.
+    Warmup epochs 0-1 (lines 2-7): additionally train MIA on ALL train features
+      (member=1) and ALL val features (non-member=0), normalized to zero mean /
+      unit variance, for 2 inner epochs — exactly as stated in Algorithm 2.
+    MIA is frozen after the warmup ends (no longer updated).
+
+    Disclosed departure from paper: we L2-clip features/logits to their stated
+    sensitivity bound before adding noise in Algorithm 1, ensuring the Gaussian
+    mechanism's sensitivity assumption is satisfied.
     """
     opt_t   = torch.optim.Adam(teacher.parameters(), lr=1e-3)
     opt_mia = torch.optim.Adam(mia.parameters(), lr=1e-4)
     bce     = nn.BCELoss()
+    MIA_BS  = 32   # mini-batch size for MIA inner training
 
-    # Phase 1 — warmup
-    for ep in range(2):
+    for ep in range(TEACHER_EPOCHS):
+
+        # ── Warmup: train MIA (Algorithm 2, lines 2-7) ──────────────────────
+        if ep < 2:
+            # Extract ALL features from train (members) and val (non-members)
+            feats_m  = _collect_features(teacher, train_loader, device)
+            feats_nm = _collect_features(teacher, val_loader,   device)
+            # Normalize to zero mean / unit variance (Algorithm 2, line 5)
+            combined = torch.cat([feats_m, feats_nm])
+            mu       = combined.mean()
+            sig_n    = combined.std() + 1e-8
+            feats_m_n  = (feats_m  - mu) / sig_n
+            feats_nm_n = (feats_nm - mu) / sig_n
+            # 2 inner epochs of MIA training on combined data (lines 6-7)
+            mia.train()
+            for _ in range(2):
+                for i in range(0, len(feats_m_n), MIA_BS):
+                    b = feats_m_n[torch.randperm(len(feats_m_n))[i:i+MIA_BS]]
+                    opt_mia.zero_grad()
+                    bce(mia(b),
+                        torch.ones(len(b), 1, device=device)).backward()
+                    opt_mia.step()
+                for i in range(0, len(feats_nm_n), MIA_BS):
+                    b = feats_nm_n[torch.randperm(len(feats_nm_n))[i:i+MIA_BS]]
+                    opt_mia.zero_grad()
+                    bce(mia(b),
+                        torch.zeros(len(b), 1, device=device)).backward()
+                    opt_mia.step()
+            # Freeze MIA after warmup ends
+            if ep == 1:
+                for p in mia.parameters():
+                    p.requires_grad_(False)
+
+        # ── Teacher adversarial update — every epoch (lines 8-14) ───────────
         teacher.train()
-        mia.train()
-        for x, y in train_loader:
-            x, y = x.to(device), y.to(device)
-            # Task update for teacher (no adversarial yet)
-            feat, logit = teacher.get_features_and_logits(x)
-            opt_t.zero_grad()
-            seg_loss(logit, y).backward()
-            opt_t.step()
-            # MIA: train set = members (label 1)
-            opt_mia.zero_grad()
-            bce(mia(feat.detach()),
-                torch.ones(x.shape[0], 1, device=device)).backward()
-            opt_mia.step()
-        # MIA: val set = non-members (label 0)
-        teacher.eval()
-        for x, _ in val_loader:
-            x = x.to(device)
-            with torch.no_grad():
-                feat, _ = teacher.get_features_and_logits(x)
-            opt_mia.zero_grad()
-            bce(mia(feat),
-                torch.zeros(x.shape[0], 1, device=device)).backward()
-            opt_mia.step()
-
-    # Phase 2 — freeze MIA, adversarially train teacher
-    for p in mia.parameters():
-        p.requires_grad_(False)
-    mia.eval()
-
-    for ep in range(TEACHER_EPOCHS - 2):
-        teacher.train()
+        mia.eval()
         for x, y in train_loader:
             x, y = x.to(device), y.to(device)
             opt_t.zero_grad()
             feat, logit = teacher.get_features_and_logits(x)
             l_task = seg_loss(logit, y)
-            # Teacher wants MIA to predict non-member (adversarial goal)
-            l_adv  = bce(mia(feat),
+            # line 11: z.detach() — MIA gradient does not flow to teacher
+            l_adv  = bce(mia(feat.detach()),
                          torch.zeros(x.shape[0], 1, device=device))
             (l_task + lam_adv * l_adv).backward()
             opt_t.step()
-        if (ep + 3) % 10 == 0:
-            print(f"    teacher ep {ep+3}/{TEACHER_EPOCHS} done")
+
+        if (ep + 1) % 10 == 0:
+            print(f"    teacher ep {ep+1}/{TEACHER_EPOCHS} done")
 
 
 def train_student(teacher, train_ds, val_loader, eps, hp, in_ch, bs, device):
