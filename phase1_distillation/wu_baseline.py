@@ -22,7 +22,7 @@ Usage:
   # Step 1: HP search on BUSI val at eps=8 (run once, saves results/wu_busi_hparams.json)
   python wu_baseline.py --dataset busi --hparam
 
-  # Step 2: Full experiment for each dataset
+  # Step 2: Full experiment for each dataset (te=60, se=40 — matches CANAL)
   python wu_baseline.py --dataset isic
   python wu_baseline.py --dataset kvasir
   python wu_baseline.py --dataset busi
@@ -54,8 +54,8 @@ DELTA    = 1e-5
 S_FEAT   = 1.0    # per-sample feature sensitivity  (Wu et al. Algorithm 1)
 S_LOGIT  = 2.0    # per-sample logit sensitivity    (Wu et al. Algorithm 1)
 
-TEACHER_EPOCHS = 50
-STUDENT_EPOCHS = 200
+TEACHER_EPOCHS = 60   # matches CANAL (--te 60)
+STUDENT_EPOCHS = 40   # matches CANAL (--se 40)
 
 # Batch sizes = sqrt(N), matching CANAL/DP-SGD for fair comparison
 DATASET_CFG = {
@@ -355,7 +355,7 @@ def run_hparam_search(device):
 
     tau_vals   = [2.0, 4.0, 8.0]
     EPS_HP     = 8.0
-    STUD_HP_EP = 50
+    STUD_HP_EP = STUDENT_EPOCHS  # same as full experiment (40)
 
     # Train teacher once — shared across all tau candidates
     torch.manual_seed(100)
@@ -363,7 +363,7 @@ def run_hparam_search(device):
     teacher      = MultiViewTeacher(n_views=1, base=16).to(device)
     mia          = MIADiscriminator(feat_dim=16 * 4).to(device)
     train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, drop_last=True)
-    print("  Training teacher (seed=100, 50 epochs)...")
+    print(f"  Training teacher (seed=100, {TEACHER_EPOCHS} epochs)...")
     train_teacher(teacher, mia, train_loader, val_loader, device, LAM_ADV)
     print(f"  Teacher val Dice: {evaluate_vessel_dice(teacher, val_loader, device):.4f}")
 
