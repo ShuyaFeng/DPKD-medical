@@ -336,45 +336,45 @@ def get_dataset(name, split):
 
 def run_hparam_search(device):
     """
-    Tune lambda_adv and tau on BUSI val at eps=8.
-    alpha=beta=gamma=1.0, delta_w=0.1 fixed (reasonable defaults from literature).
-    Uses 50 student epochs for speed; sigma is still huge at eps=8 on BUSI.
+    Tune tau on BUSI val at eps=8.
+    lam_adv is fixed at 0.1 here and kept fixed in best_hp because lam_adv
+    only affects teacher training — we cannot tune it cheaply (would require
+    one full teacher training per candidate value).  alpha=beta=gamma=1.0,
+    delta_w=0.1 are also fixed as reasonable prior-literature defaults.
     Saves best HP to results/wu_busi_hparams.json.
     """
     from busi_dataset import BUSIDataset
-    bs      = DATASET_CFG["busi"]["bs"]
-    train_ds = BUSIDataset("train", 96)
-    val_ds   = BUSIDataset("val",   96)
+    bs         = DATASET_CFG["busi"]["bs"]
+    LAM_ADV    = 0.1   # fixed — only tau is tuned
+    train_ds   = BUSIDataset("train", 96)
+    val_ds     = BUSIDataset("val",   96)
     val_loader = DataLoader(val_ds, batch_size=4, shuffle=False)
 
     print(f"HP search | BUSI | eps=8.0 | device={device}")
     print(f"  Train={len(train_ds)}  Val={len(val_ds)}")
+    print(f"  Tuning: tau in {{2, 4, 8}}  |  lam_adv fixed at {LAM_ADV}")
 
-    lam_adv_vals = [0.01, 0.1, 0.5]
-    tau_vals     = [2.0,  4.0, 8.0]
-    EPS_HP       = 8.0
-    STUD_HP_EP   = 50
+    tau_vals   = [2.0, 4.0, 8.0]
+    EPS_HP     = 8.0
+    STUD_HP_EP = 50
 
-    # Train teacher once with default lam_adv (will be reused for all HP combos)
+    # Train teacher once — shared across all tau candidates
     torch.manual_seed(100)
     np.random.seed(100)
-    teacher     = MultiViewTeacher(n_views=1, base=16).to(device)
-    mia         = MIADiscriminator(feat_dim=16 * 4).to(device)
+    teacher      = MultiViewTeacher(n_views=1, base=16).to(device)
+    mia          = MIADiscriminator(feat_dim=16 * 4).to(device)
     train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, drop_last=True)
     print("  Training teacher (seed=100, 50 epochs)...")
-    train_teacher(teacher, mia, train_loader, val_loader, device, lam_adv=0.1)
+    train_teacher(teacher, mia, train_loader, val_loader, device, LAM_ADV)
     print(f"  Teacher val Dice: {evaluate_vessel_dice(teacher, val_loader, device):.4f}")
 
-    combos    = list(itertools.product(lam_adv_vals, tau_vals))
     runs      = []
     best_dice = -1.0
-    best_hp   = None
+    best_tau  = tau_vals[0]
 
-    for lam_adv, tau in combos:
-        hp = dict(alpha=1.0, beta=1.0, gamma=1.0, delta_w=0.1,
-                  lam_adv=lam_adv, tau=tau)
+    for tau in tau_vals:
         loader2 = DataLoader(train_ds, batch_size=bs, shuffle=True, drop_last=True)
-        T = STUD_HP_EP * len(loader2)
+        T  = STUD_HP_EP * len(loader2)
         sf = compute_sigma(0.5 * EPS_HP, DELTA, S_FEAT,  T)
         sl = compute_sigma(0.5 * EPS_HP, DELTA, S_LOGIT, T)
 
@@ -393,21 +393,19 @@ def run_hparam_search(device):
                 ls = student.decode(e1, e2, e3)
                 opt_s.zero_grad()
                 student_loss(ls, e3, y, lt_n, ft_n,
-                             hp["alpha"], hp["beta"], hp["gamma"],
-                             hp["delta_w"], hp["tau"]).backward()
+                             1.0, 1.0, 1.0, 0.1, tau).backward()
                 opt_s.step()
 
         dice = evaluate_vessel_dice(student, val_loader, device)
-        print(f"  lam_adv={lam_adv}  tau={tau}  Dice={dice:.4f}"
-              f"  (sf={sf:.0f}  sl={sl:.0f})")
-        runs.append({"lam_adv": lam_adv, "tau": tau, "dice": float(dice)})
+        print(f"  tau={tau}  Dice={dice:.4f}  (sf={sf:.0f}  sl={sl:.0f})")
+        runs.append({"tau": tau, "dice": float(dice)})
         if dice > best_dice:
             best_dice = dice
-            best_hp   = dict(alpha=1.0, beta=1.0, gamma=1.0, delta_w=0.1,
-                             lam_adv=lam_adv, tau=tau)
+            best_tau  = tau
 
-    print(f"\nBest: lam_adv={best_hp['lam_adv']}  tau={best_hp['tau']}  "
-          f"Dice={best_dice:.4f}")
+    best_hp = dict(alpha=1.0, beta=1.0, gamma=1.0, delta_w=0.1,
+                   lam_adv=LAM_ADV, tau=best_tau)
+    print(f"\nBest: tau={best_tau}  Dice={best_dice:.4f}")
     out = HERE / "results" / "wu_busi_hparams.json"
     out.write_text(json.dumps({"best": best_hp, "runs": runs}, indent=2))
     print(f"Saved: {out}")
