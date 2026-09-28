@@ -29,7 +29,6 @@ Usage:
 """
 
 import argparse
-import itertools
 import json
 import math
 import sys
