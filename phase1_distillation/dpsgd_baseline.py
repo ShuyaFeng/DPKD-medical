@@ -46,16 +46,36 @@ EPSILONS = [1.0, 2.0, 4.0, 8.0]
 SEEDS    = [100, 200, 300, 400, 500]
 DELTA    = 1e-5
 
-# Per-dataset hyperparameters following Abadi 2016 Section 3.3:
-#   bs = √N (paper recommendation for lot size)
-#   max_grad_norm = median of unclipped gradient norms (measured via measure_grad_norms.py)
-#   lr = 0.05 (paper Section 3.3: accuracy peaks at 0.05)
-#   epochs = 200 (same as CANAL for fair comparison)
-DATASET_CFG = {
+# Fallback hyperparameters (used only if grid search JSON not found).
+# max_grad_norm = median grad norm measured per dataset.
+# Best HP should come from {dataset}_dpsgd_gridsearch.json (run dpsgd_gridsearch.py first).
+DATASET_CFG_DEFAULT = {
     "isic":   dict(epochs=200, bs=45, lr=0.05, max_grad_norm=4.86),
     "kvasir": dict(epochs=200, bs=28, lr=0.05, max_grad_norm=3.46),
     "busi":   dict(epochs=200, bs=23, lr=0.05, max_grad_norm=2.28),
 }
+
+# Batch sizes are fixed regardless of HP source (sqrt(N) per dataset)
+DATASET_BS = {"isic": 45, "kvasir": 28, "busi": 23}
+
+
+def load_cfg(dataset):
+    """Load best HP from grid search JSON, fall back to defaults if not found."""
+    gs_path = HERE / "results" / f"{dataset}_dpsgd_gridsearch.json"
+    if gs_path.exists():
+        best = json.loads(gs_path.read_text())["best"]
+        cfg = dict(
+            epochs=best["epochs"],
+            bs=DATASET_BS[dataset],
+            lr=best["lr"],
+            max_grad_norm=best["C"],
+        )
+        print(f"  HP from grid search ({gs_path.name}): "
+              f"C={best['C']}  lr={best['lr']}  epochs={best['epochs']}")
+    else:
+        cfg = dict(DATASET_CFG_DEFAULT[dataset])
+        print(f"  HP (default — run dpsgd_gridsearch.py --dataset {dataset} first): {cfg}")
+    return cfg
 
 
 def get_dataset(name, split):
@@ -144,7 +164,7 @@ def main():
 
     epsilons = [8.0] if args.smoke else EPSILONS
     seeds    = [100]  if args.smoke else SEEDS
-    cfg = dict(DATASET_CFG[args.dataset])
+    cfg = load_cfg(args.dataset)
     if args.smoke:
         cfg["epochs"] = 10
 
