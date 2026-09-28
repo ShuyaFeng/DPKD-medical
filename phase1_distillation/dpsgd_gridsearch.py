@@ -55,8 +55,11 @@ DATASET_CFG = {
     "kvasir": dict(in_ch=3, bs=28, C_values=[0.5, 1.5,  3.46, 5.0]),
 }
 
-LR_VALUES    = [0.01, 0.05, 0.1]
-EPOCH_VALUES = [100, 200, 300]
+# lr=0.01 and epochs=100 fixed across all datasets (BUSI grid search finding:
+# lr=0.05/0.1 collapse under DP noise; more epochs always hurts).
+# Only C is dataset-specific (gradient scale differs per dataset).
+LR_VALUES    = [0.01]
+EPOCH_VALUES = [100]
 
 
 def seg_loss(logits, y):
