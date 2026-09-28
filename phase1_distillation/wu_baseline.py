@@ -284,8 +284,7 @@ def train_teacher(teacher, mia, train_loader, val_loader, device, lam_adv):
             opt_t.zero_grad()
             feat, logit = teacher.get_features_and_logits(x)
             l_task = seg_loss(logit, y)
-            # line 11: z.detach() — MIA gradient does not flow to teacher
-            l_adv  = bce(mia(feat.detach()),
+            l_adv  = bce(mia(feat),
                          torch.zeros(x.shape[0], 1, device=device))
             (l_task + lam_adv * l_adv).backward()
             opt_t.step()
