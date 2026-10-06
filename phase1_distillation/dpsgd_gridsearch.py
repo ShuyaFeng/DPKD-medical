@@ -2,17 +2,17 @@
 DP-SGD hyperparameter grid search — per dataset, ε=8.0.
 
 Searches over:
-  C   (max_grad_norm): dataset-specific range centered on median grad norm
-  lr:                  [0.01, 0.05, 0.1]
-  epochs:              [100, 200, 300]
+  C (max_grad_norm): dataset-specific range centered on median grad norm
 
 Fixed:
   epsilon = 8.0   (loosest budget — find best HP here, apply to all ε)
+  lr      = 0.01  (BUSI grid search showed lr=0.05/0.1 collapse under DP noise)
+  epochs  = 100   (BUSI grid search showed more epochs always hurts)
   seeds   = [100, 200, 300]
   delta   = 1e-5
   bs      = sqrt(N) per dataset
 
-Goal: find (C, lr, epochs) that gives best mean Dice on val set.
+Goal: find C that gives best mean Dice on val set.
 Results saved to results/{dataset}_dpsgd_gridsearch.json.
 
 Usage:
@@ -45,12 +45,13 @@ EPSILON = 8.0
 DELTA   = 1e-5
 SEEDS   = [100, 200, 300]
 
-# C range centered around each dataset's measured median grad norm:
-#   BUSI   median = 2.28  → try below and above
-#   ISIC   median = 4.86  → try below and above
-#   Kvasir median = 3.46  → try below and above
+# C range centered around each dataset's measured median grad norm
+# (measured by measure_grad_norms.py). Values tried below and above the median.
+#   BUSI   median = 2.28  → C in [1.0, 2.28, 3.5, 5.0]   best: C=1.0
+#   ISIC   median = 4.86  → C in [1.0, 2.5,  4.86, 7.0]  best: pending
+#   Kvasir median = 3.46  → C in [0.5, 1.5,  3.46, 5.0]  best: pending
 DATASET_CFG = {
-    "busi":   dict(in_ch=1, bs=23, C_values=[0.5, 1.0, 2.28, 3.5]),
+    "busi":   dict(in_ch=1, bs=23, C_values=[1.0, 2.28, 3.5, 5.0]),
     "isic":   dict(in_ch=3, bs=45, C_values=[1.0, 2.5,  4.86, 7.0]),
     "kvasir": dict(in_ch=3, bs=28, C_values=[0.5, 1.5,  3.46, 5.0]),
 }

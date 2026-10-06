@@ -148,8 +148,10 @@ def main():
     ap.add_argument("--seeds",    type=int, default=5)
     ap.add_argument("--te",       type=int, default=60)
     ap.add_argument("--se",       type=int, default=40)
-    ap.add_argument("--epsilons", default="1,2,4,8")
-    ap.add_argument("--suffix",   default="", help="suffix appended to result and checkpoint filenames to avoid overwriting")
+    ap.add_argument("--epsilons",  default="1,2,4,8")
+    ap.add_argument("--suffix",    default="", help="suffix appended to result and checkpoint filenames to avoid overwriting")
+    ap.add_argument("--no_noise",  action="store_true",
+                    help="Non-private reference (eps=inf): run once with sigma=0, no DP noise anywhere")
     args = ap.parse_args()
 
     dev   = ("cuda" if torch.cuda.is_available()
@@ -208,6 +210,32 @@ def main():
         },
         "sweep": {},
     }
+
+    if args.no_noise:
+        # eps=inf reference: sigma=0 everywhere, clean caps, clean importance
+        sigma_zero   = torch.zeros(Cb, device=dev)
+        rank_clean   = torch.argsort(importance, descending=True)
+        top_mask_inf = torch.zeros(Cb, dtype=torch.bool, device=dev)
+        top_mask_inf[rank_clean[:n_keep]] = True
+
+        print("\n[no_noise / eps=inf]  sigma=0 everywhere, no DP noise")
+        t0    = time.time()
+        dices = run_students(train_ds, val_loader, teachers, caps_list,
+                             top_mask_inf, sigma_zero, dev, SEEDS, args.se, in_ch,
+                             cache_seed=999999,
+                             dataset=args.dataset, is_canal=True, eps=9999, suffix=sfx)
+        stats = cell_stats(dices)
+        print(f"  Dice={stats['mean']:.4f}  ({time.time()-t0:.1f}s)")
+
+        nn_results = {
+            "dataset": args.dataset, "method": "no_noise",
+            "seeds": SEEDS, "dices": stats["dices"],
+            "mean": stats["mean"], "std": stats["std"], "sem": stats["sem"],
+        }
+        out = HERE / "results" / f"{args.dataset}_noprivacy_results.json"
+        out.write_text(json.dumps(nn_results, indent=2))
+        print(f"Saved: {out}")
+        return
 
     for eps in EPS:
         rho      = eps_to_rho(eps)

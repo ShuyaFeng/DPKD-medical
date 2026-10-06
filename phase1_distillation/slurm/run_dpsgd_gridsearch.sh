@@ -1,21 +1,25 @@
 #!/bin/bash
-# Submit DP-SGD grid search job — BUSI dataset, ε=8.0.
+# Submit DP-SGD grid search job for a single dataset.
 # Usage from Cheaha:
-#   bash slurm/run_dpsgd_gridsearch.sh
+#   bash slurm/run_dpsgd_gridsearch.sh busi
+#   bash slurm/run_dpsgd_gridsearch.sh isic
+#   bash slurm/run_dpsgd_gridsearch.sh kvasir
+
+DS=${1:?"Usage: bash slurm/run_dpsgd_gridsearch.sh <busi|isic|kvasir>"}
 
 sbatch <<SLURM
 #!/bin/bash
-#SBATCH --job-name=dpsgd_grid
+#SBATCH --job-name=dpsgd_grid_${DS}
 #SBATCH --partition=pascalnodes
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=12:00:00
-#SBATCH --output=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/dpsgd_grid_%j.out
-#SBATCH --error=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/dpsgd_grid_%j.err
+#SBATCH --output=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/dpsgd_grid_${DS}_%j.out
+#SBATCH --error=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/dpsgd_grid_${DS}_%j.err
 
 echo "=========================================="
-echo "DP-SGD Grid Search — BUSI  ε=8.0"
+echo "DP-SGD Grid Search — ${DS}  ε=8.0"
 echo "Job ID: \$SLURM_JOB_ID  Node: \$(hostname)  Start: \$(date)"
 echo "=========================================="
 
@@ -30,9 +34,9 @@ fi
 
 cd /home/ab36/DPKD-medical/phase1_distillation
 
-python -u dpsgd_gridsearch.py
+python -u dpsgd_gridsearch.py --dataset ${DS}
 
 echo "Finished: \$(date)"
 SLURM
 
-echo "Submitted dpsgd_grid"
+echo "Submitted dpsgd_grid_${DS}"

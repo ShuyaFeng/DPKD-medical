@@ -100,6 +100,42 @@ domain-required changes, all of which are disclosed.
 
 ---
 
+## 2b. Eq. 7 vs Algorithm 1 — Per-Step Composition (Improvement Over Paper)
+
+**What Eq. 7 (Section 5.3) says:**
+```
+σ = Δ√(2ln(1.25/δ)) / ε
+```
+This is the basic Gaussian mechanism formula for a **single release** — it assumes noise
+is added exactly once and the full ε budget is spent in that one step.
+
+**What Algorithm 1 says (what our code does):**
+```
+ε_step = ε / T
+σ = S√(2ln(1.25/δ)) / ε_step
+```
+This divides the privacy budget equally across all T training steps. Each step spends
+only ε/T of the budget, so σ is computed with a much smaller per-step budget →
+much larger noise per step → correct multi-step privacy accounting.
+
+**Why Algorithm 1 is correct and Eq. 7 is not sufficient here:**
+Student training runs for T steps (e.g. BUSI: 40 epochs × 23 batches = 920 steps).
+Noise is added at every step. If Eq. 7 were used directly, σ would be computed with
+the full ε — far too little noise for 920 releases. An attacker observing all 920
+noisy outputs could average them to reconstruct the original with near-zero noise.
+Algorithm 1's per-step composition ensures the total privacy spent across all T steps
+equals exactly ε, making the formal guarantee honest.
+
+**Paper text to use:**
+"Section 5.3 of Wu et al. (Eq. 7) presents the Gaussian mechanism formula for a
+single release: σ = Δ√(2ln(1.25/δ))/ε. However, student training adds noise at
+every mini-batch step. We therefore follow Algorithm 1, which divides the privacy
+budget as ε_step = ε/T and computes σ using ε_step, ensuring the total privacy
+spent across all T steps equals exactly ε. Using Eq. 7 directly would result in
+insufficient noise per step and an invalid privacy guarantee."
+
+---
+
 ## 3. What Is Unchanged (Faithful to the Paper)
 
 For completeness — these match the paper exactly and require no disclosure:
@@ -123,7 +159,29 @@ For completeness — these match the paper exactly and require no disclosure:
 
 ---
 
-## 4. How These Departures Affect the Comparison
+## 4. Hyperparameter Tuning Protocol
+
+**What we did:**
+Hyperparameters (τ, λ_adv, α, β, γ, δ_w) were tuned on the BUSI validation set at ε=8.0
+(grid search over τ ∈ {2, 4, 8}, all other values fixed at paper defaults). The best τ=4.0
+was then applied to all three datasets and all four ε values without further tuning.
+
+**Is this fair?**
+Yes — CANAL uses the same protocol. CANAL's budget split (fc=0.1, fi=0.05, fr=0.85),
+K=3, and keep_frac=0.1 are identical across BUSI, ISIC, and Kvasir. Both methods use
+a single fixed configuration across all datasets, so neither is advantaged by per-dataset
+HP tuning.
+
+**Paper text to use (if asked by reviewers):**
+"Hyperparameters for Wu et al. were tuned on the BUSI validation set at ε=8 following
+a grid search over temperature τ ∈ {2, 4, 8}; all other loss weights were set to the
+defaults stated in the paper. The selected configuration was applied uniformly across
+all datasets and privacy budgets, consistent with how CANAL's budget allocation
+parameters are fixed across datasets."
+
+---
+
+## 5. How These Departures Affect the Comparison
 
 Both corrections in Section 1 make Wu et al. **stronger**:
 - Correction 1a (no detach): teacher's adversarial defence actually works → better privacy resistance
@@ -131,3 +189,5 @@ Both corrections in Section 1 make Wu et al. **stronger**:
 
 If CANAL outperforms this strengthened version of Wu et al., the result is more
 credible — we cannot be accused of weakening Wu et al. to make CANAL look better.
+
+One minor issue: torch.randperm is called inside the i loop — new shuffle every mini-batch instead of once per inner epoch. Does not break results but is non-standard.
