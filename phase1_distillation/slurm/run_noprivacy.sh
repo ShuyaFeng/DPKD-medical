@@ -41,7 +41,7 @@ cd /home/ab36/DPKD-medical/phase1_distillation
 
 python -u canal_final_experiment.py \\
     --dataset ${DS} \\
-    --seeds 5 --te 60 --se 40 \\
+    --seeds 10 --te 60 --se 40 \\
     --no_noise
 
 echo "Finished: \$(date)"
