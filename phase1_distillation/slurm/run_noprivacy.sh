@@ -1,5 +1,6 @@
 #!/bin/bash
-# Submit non-private (eps=inf) reference jobs for all 3 datasets.
+# Submit non-private (eps=inf) reference jobs — 10-seed run (all 3 datasets).
+# Saves to {dataset}_noprivacy_results_10seeds.json (does NOT overwrite 5-seed results).
 # Usage: bash slurm/run_noprivacy.sh [dataset]
 #   No arg  → submits all 3 datasets
 #   dataset → submits only that dataset (busi | isic | kvasir)
@@ -42,6 +43,7 @@ cd /home/ab36/DPKD-medical/phase1_distillation
 python -u canal_final_experiment.py \\
     --dataset ${DS} \\
     --seeds 10 --te 60 --se 40 \\
+    --suffix 10seeds \\
     --no_noise
 
 echo "Finished: \$(date)"

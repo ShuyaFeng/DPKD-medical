@@ -232,7 +232,7 @@ def main():
             "seeds": SEEDS, "dices": stats["dices"],
             "mean": stats["mean"], "std": stats["std"], "sem": stats["sem"],
         }
-        out = HERE / "results" / f"{args.dataset}_noprivacy_results.json"
+        out = HERE / "results" / f"{args.dataset}_noprivacy_results{sfx}.json"
         out.write_text(json.dumps(nn_results, indent=2))
         print(f"Saved: {out}")
         return
