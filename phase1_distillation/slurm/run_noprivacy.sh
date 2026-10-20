@@ -1,31 +1,21 @@
 #!/bin/bash
-# Submit non-private (eps=inf) reference jobs — 10-seed run (all 3 datasets).
-# Saves to {dataset}_noprivacy_results_10seeds.json (does NOT overwrite 5-seed results).
-# Usage: bash slurm/run_noprivacy.sh [dataset]
-#   No arg  → submits all 3 datasets
-#   dataset → submits only that dataset (busi | isic | kvasir)
+# Submit non-private (eps=inf) reference job — 20-seed run for BUSI only.
+# Saves to busi_noprivacy_results_20seeds.json (does NOT overwrite 5-seed or 10-seed results).
+# Usage: bash slurm/run_noprivacy.sh
 
-DATASETS=("busi" "isic" "kvasir")
-TARGET="${1:-all}"
-
-for DS in "${DATASETS[@]}"; do
-    if [[ "$TARGET" != "all" && "$TARGET" != "$DS" ]]; then
-        continue
-    fi
-
-    sbatch <<EOF
+sbatch <<EOF
 #!/bin/bash
-#SBATCH --job-name=noprivacy_${DS}
+#SBATCH --job-name=noprivacy_busi_20s
 #SBATCH --partition=pascalnodes
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=0-12:00:00
-#SBATCH --output=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/noprivacy_${DS}_%j.out
-#SBATCH --error=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/noprivacy_${DS}_%j.err
+#SBATCH --output=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/noprivacy_busi_20seeds_%j.out
+#SBATCH --error=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/noprivacy_busi_20seeds_%j.err
 
 echo "=========================================="
-echo "Non-private reference (eps=inf) — ${DS}"
+echo "Non-private reference (eps=inf) — BUSI 20 seeds"
 echo "Job ID: \$SLURM_JOB_ID  Node: \$(hostname)  Start: \$(date)"
 echo "=========================================="
 
@@ -41,13 +31,12 @@ fi
 cd /home/ab36/DPKD-medical/phase1_distillation
 
 python -u canal_final_experiment.py \\
-    --dataset ${DS} \\
-    --seeds 10 --te 60 --se 40 \\
-    --suffix 10seeds \\
+    --dataset busi \\
+    --seeds 20 --te 60 --se 40 \\
+    --suffix 20seeds \\
     --no_noise
 
 echo "Finished: \$(date)"
 EOF
 
-    echo "Submitted noprivacy_${DS}"
-done
+echo "Submitted noprivacy_busi_20seeds"
