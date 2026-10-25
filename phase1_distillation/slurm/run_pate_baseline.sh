@@ -1,5 +1,5 @@
 #!/bin/bash
-# Submit PATE baseline (Papernot et al. 2017) experiment — one job per dataset.
+# Submit PATE/GNMax baseline (Papernot et al. 2018, arXiv:1802.08908) — one job per dataset.
 #
 # Usage:
 #   bash slurm/run_pate_baseline.sh            # submits all three datasets
@@ -21,7 +21,7 @@ for DS in $DATASETS; do
 #SBATCH --error=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/pate_${DS}_%j.err
 
 echo "=========================================="
-echo "PATE baseline (Papernot et al. 2017) — ${DS}"
+echo "PATE/GNMax baseline (Papernot et al. 2018) — ${DS}"
 echo "Job ID: \$SLURM_JOB_ID  Node: \$(hostname)  Start: \$(date)"
 echo "=========================================="
 

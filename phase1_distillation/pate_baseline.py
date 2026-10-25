@@ -1,71 +1,59 @@
 """
-Output-Space DP Baseline — PATE adaptation for medical image segmentation.
+Output-Space DP Baseline — PATE with GNMax aggregator for segmentation.
 
-Adapts the PATE framework (Papernot et al., ICLR 2017, "Semi-supervised
-Knowledge Transfer for Deep Learning from Private Training Data") to
-segmentation. Discrete class voting (LNMax) is replaced with soft-mask
-averaging: each teacher produces a foreground probability map, maps are
-clipped and averaged across K teachers, and Gaussian noise is added.
-We call this "Output-Space DP" and cite PATE as the foundational paradigm.
+Implements the PATE framework with the GNMax aggregator and Rényi DP
+accounting from the follow-up paper:
+  Papernot et al., "Scalable Private Learning with PATE"
+  ICLR 2018, arXiv:1802.08908
 
-Departures from original PATE (all disclosed in paper):
-  1. K=3 teachers instead of n=250.
-     Original PATE relies on large n for the vote gap (gap ≈ 60% of n).
-     With K=3, max gap = 3; q ≈ 0.46 even at unanimous agreement (Lemma 4).
-     Poor performance at small K is an expected and reported result.
+The original PATE (Papernot et al., ICLR 2017, arXiv:1610.05755) used
+LNMax (Laplace on vote counts) with the moments accountant. We use GNMax
+(Gaussian on vote counts) with Rényi DP accounting so that epsilon is
+directly comparable to CANAL's Gaussian/zCDP setup.
 
-  2. Continuous soft masks instead of discrete hard labels.
-     PATE outputs argmax over vote counts — one integer label per image.
-     Segmentation requires H×W predictions; argmax is not applicable.
-     Each teacher outputs softmax(logits)[:,1] ∈ [0,1]^(H×W) instead.
-     Student trains with BCE + soft-Dice on clamped noisy masks (not CE on
-     hard labels as in the original).
+Aggregation (GNMax, Algorithm 1 of Papernot et al. 2018):
+  Each teacher produces a hard binary segmentation mask (argmax of logits).
+  For each pixel (h,w), vote counts n_1(h,w) and n_0(h,w) = K − n_1(h,w)
+  are formed. Independent Gaussian noise N(0,σ²) is added to each count,
+  and argmax selects the winning class. The result is a hard binary mask
+  cached once per training image (sample-once, matching CANAL).
 
-  3. Gaussian mechanism instead of LNMax (Laplacian on argmax).
-     Original: f(x) = argmax_j { n_j(x) + Lap(1/γ) }  (Eq. 1, Theorem 2).
-     Ours: noisy_mask = mean(clipped_masks) + N(0, σ²I).
-     Laplacian + argmax cannot operate on continuous H×W vectors.
+Sensitivity (per Dr. Tian):
+  Replacing one training record changes one teacher. In the worst case that
+  teacher's mask flips at every pixel, changing vote counts by ±1 at all
+  H×W pixels. The L2 sensitivity of the (H×W × 2)-dimensional vote vector
+  is therefore Δ_2 = √(2HW). For 96×96 images: Δ_2 ≈ 135.8.
 
-  4. zCDP (Gaussian) instead of moments accountant (Laplacian).
-     Original PATE uses the moments accountant (Abadi et al. 2016) for
-     tight data-dependent bounds under Laplacian noise.
-     We use zCDP (ρ = eps_to_rho(ε, δ)) with Gaussian noise for consistency
-     with CANAL, enabling a direct apples-to-apples comparison.
-
-  5. Student queries teachers on PRIVATE training data (not public data).
-     Original PATE trains the student on public/unlabeled non-sensitive data
-     labeled by the noisy vote mechanism.
-     No public medical imaging data is available in our setting, so we query
-     teachers on the private training images to generate soft-mask supervision.
-
-  6. Supervised student instead of semi-supervised GAN training (PATE-G).
-     The GAN-based semi-supervised approach requires public unlabeled data
-     and is not applicable here.
-
-DP accounting (zCDP, same framework as CANAL):
-  C  = 90th-percentile of soft-mask L2 norms (all teachers × all train images)
-  Δ  = 2C / K   (replace-one sensitivity: one record change shifts the
-                  mean by ≤ 2C/K in L2 norm, since only one teacher changes)
-  ρ  = eps_to_rho(ε, δ=1e-5)
-  σ  = Δ / sqrt(2ρ)
-
-  Accounting simplification (same as CANAL): the precomputed cache contains
-  one noisy release per training image (N total). We account for ε as a
-  single release (sample-once principle), identical to how CANAL accounts for
-  its N cached bottleneck features. The relative comparison between methods
-  is therefore fair.
+DP accounting (Rényi DP / zCDP — same framework as CANAL):
+  For the Gaussian mechanism with L2 sensitivity Δ_2, the optimal
+  RDP → (ε,δ)-DP conversion is equivalent to the zCDP formula:
+    ρ = eps_to_rho(ε, δ=1e-5)
+    σ = Δ_2 / √(2ρ) = √(HW / ρ)
+  Privacy unit: one release per training image (sample-once, same as CANAL).
+  Both methods have N releases; both report per-release ε.
 
 Why this baseline underperforms CANAL:
-  C (soft-mask L2 norm on a 96×96 image) ≈ 20–40, so Δ = 2C/K >> 2/K
-  (CANAL's sensitivity in unit-norm feature space). Proportionally more
-  Gaussian noise is required at every ε, leading to lower Dice scores.
-  This directly demonstrates CANAL's advantage from feature-space compression.
+  CANAL normalises each feature channel to the unit ball, giving sensitivity
+  Δ_c = 2/K per channel and σ ≈ 5 at ε=1. PATE/GNMax works in pixel space
+  where one teacher's entire H×W mask can flip, giving Δ_2 = √(2HW) ≈ 136
+  and σ ≈ 2000 at ε=1. CANAL's feature-space normalisation reduces
+  sensitivity by ~70× relative to PATE's pixel-space operation.
+
+Adaptations for segmentation (disclosed):
+  1. GNMax applied pixel-by-pixel (binary: background vs foreground).
+     Original PATE/GNMax aggregates a single class label per image.
+     Segmentation requires H×W predictions; GNMax is applied independently
+     at each pixel (h,w) with the same σ.
+  2. K=3 teachers (vs n≥100 in the paper).
+     With K=3, vote gaps are small (max gap=3) so data-dependent privacy
+     bounds are not materially tighter than worst-case. We use worst-case σ.
+  3. Student queries private training images (no public data available).
+     Original PATE labels a public unlabeled set via the noisy mechanism.
 
 Pipeline:
   1. Train K=3 TinyUNet(base=32) teachers on disjoint patient cohorts (60 ep)
-  2. Compute C = 90th-percentile of soft-mask L2 norms across all teachers
-  3. For each ε: compute σ, cache one noisy soft mask per training image
-  4. Train TinyUNet(base=16) student for 40 ep with BCE + soft-Dice loss
+  2. For each ε: compute σ = √(HW/ρ), cache one GNMax hard mask per image
+  3. Train TinyUNet(base=16) student for 40 ep with CE + Dice on hard masks
 
 Usage:
   python pate_baseline.py --dataset isic
@@ -94,13 +82,13 @@ HERE = Path(__file__).parent
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-K               = 3
-EPSILONS        = [1.0, 2.0, 4.0, 8.0]
-SEEDS           = [100, 200, 300, 400, 500]
-DELTA           = 1e-5
-CAPS_PERCENTILE = 90
-TEACHER_EPOCHS  = 60
-STUDENT_EPOCHS  = 40
+K              = 3
+EPSILONS       = [1.0, 2.0, 4.0, 8.0]
+SEEDS          = [100, 200, 300, 400, 500]
+DELTA          = 1e-5
+IMG_SIZE       = 96       # H = W
+TEACHER_EPOCHS = 60
+STUDENT_EPOCHS = 40
 
 DATASET_CFG = {
     "isic":   dict(in_ch=3, bs=45),
@@ -116,60 +104,65 @@ DATASET_CFG = {
 def get_dataset(name, split):
     if name == "isic":
         from isic_dataset import ISICDataset
-        return ISICDataset(split, 96)
+        return ISICDataset(split, IMG_SIZE)
     if name == "kvasir":
         from kvasir_dataset import KvasirDataset
-        return KvasirDataset(split, 96)
+        return KvasirDataset(split, IMG_SIZE)
     if name == "busi":
         from busi_dataset import BUSIDataset
-        return BUSIDataset(split, 96)
-    raise ValueError(f"Unknown dataset: {name}. Choose from isic, kvasir, busi.")
+        return BUSIDataset(split, IMG_SIZE)
+    raise ValueError(f"Unknown dataset: {name}")
 
 
 # =============================================================================
-# DP machinery
+# DP machinery — GNMax with Rényi DP / zCDP
 # =============================================================================
 
-@torch.no_grad()
-def compute_C(teachers, train_ds, device):
-    """90th-percentile L2 norm cap over all (teacher, image) pairs."""
-    all_norms = []
-    loader = DataLoader(train_ds, batch_size=4, shuffle=False)
-    for teacher in teachers:
-        teacher.eval()
-        for x, _ in loader:
-            x = x.to(device)
-            soft_mask = teacher(x).softmax(1)[:, 1]         # B×H×W
-            norms = soft_mask.flatten(1).norm(dim=1)         # B
-            all_norms.extend(norms.tolist())
-    return float(np.percentile(all_norms, CAPS_PERCENTILE))
-
-
-@torch.no_grad()
-def precompute_output_cache(teachers, train_ds, C, sigma, device, seed):
+def compute_sigma(eps: float, delta: float) -> float:
     """
-    Sample-once PATE soft-mask cache. For each training image:
-      1. Each teacher produces soft_mask_k = softmax(teacher_k(x))[:,1] ∈ [0,1]^(H×W)
-      2. Clip L2 norm of each soft_mask_k to C
-      3. Average across K teachers
-      4. Add isotropic Gaussian noise N(0, σ²I)
-    Returns a list of (H×W) CPU tensors indexed by training-set position.
+    Gaussian noise scale for GNMax with sensitivity Δ_2 = √(2HW).
+
+    RDP for Gaussian mechanism: RDP(α) = α·Δ_2²/(2σ²).
+    Optimal RDP→(ε,δ)-DP conversion is equivalent to zCDP:
+      ρ = eps_to_rho(ε, δ),  σ = Δ_2 / √(2ρ) = √(HW/ρ)
+    """
+    rho = eps_to_rho(eps, delta)
+    return math.sqrt(IMG_SIZE * IMG_SIZE / rho)   # = sqrt(2HW) / sqrt(2rho)
+
+
+@torch.no_grad()
+def precompute_gnmax_cache(teachers, train_ds, sigma, device, seed):
+    """
+    GNMax cache — Papernot et al. 2018, Algorithm 1, adapted for segmentation.
+
+    For each training image x:
+      1. Each teacher k produces a hard binary mask m_k ∈ {0,1}^(H×W)
+         via argmax of its logits.
+      2. Vote counts: n_1(h,w) = Σ_k m_k(h,w),  n_0 = K − n_1.
+      3. GNMax: add independent N(0,σ²) to n_0 and n_1 at each pixel,
+         take argmax → hard binary label in {0,1}^(H×W).
+      4. Cache the hard mask (LongTensor H×W) keyed by training-set index.
     """
     torch.manual_seed(seed)
-    cache = []
+    cache  = []
     loader = DataLoader(train_ds, batch_size=4, shuffle=False)
+
     for x, _ in loader:
         x = x.to(device)
-        clipped_masks = []
+        hard_masks = []
         for teacher in teachers:
-            sm    = teacher(x).softmax(1)[:, 1]                # B×H×W
-            norms = sm.flatten(1).norm(dim=1)                  # B
-            scale = (C / norms.clamp(min=1e-8)).clamp(max=1.0)
-            clipped_masks.append(sm * scale.view(-1, 1, 1))
-        avg   = torch.stack(clipped_masks).mean(0)             # B×H×W
-        noisy = avg + torch.randn_like(avg) * sigma
-        for b in range(avg.shape[0]):
-            cache.append(noisy[b].detach().cpu())
+            teacher.eval()
+            hard_masks.append(teacher(x).argmax(1))   # B×H×W, {0,1}
+
+        n1      = torch.stack(hard_masks).sum(0).float()   # B×H×W
+        n0      = K - n1
+        noise_1 = torch.randn_like(n1) * sigma
+        noise_0 = torch.randn_like(n0) * sigma
+        label   = (n1 + noise_1 > n0 + noise_0).long()    # B×H×W, {0,1}
+
+        for b in range(x.shape[0]):
+            cache.append(label[b].cpu())
+
     return cache
 
 
@@ -177,8 +170,8 @@ def precompute_output_cache(teachers, train_ds, C, sigma, device, seed):
 # Student training
 # =============================================================================
 
-class CachedOutputDataset(Dataset):
-    """Wraps a base segmentation dataset with pre-computed noisy soft masks."""
+class CachedMaskDataset(Dataset):
+    """Wraps a base segmentation dataset with pre-computed GNMax hard masks."""
 
     def __init__(self, base_ds, cache):
         self.base_ds = base_ds
@@ -188,27 +181,27 @@ class CachedOutputDataset(Dataset):
         return len(self.base_ds)
 
     def __getitem__(self, idx):
-        x, y = self.base_ds[idx]
-        return x, y, self.cache[idx]
+        x, _ = self.base_ds[idx]
+        return x, self.cache[idx]
 
 
-def soft_mask_loss(logits, noisy_mask):
-    """BCE + soft-Dice loss against a noisy soft-mask target (clamped to [0,1])."""
-    target = noisy_mask.clamp(0.0, 1.0)
-    prob   = logits.softmax(1)[:, 1]                       # B×H×W
-    bce    = F.binary_cross_entropy(prob, target)
-    inter  = (prob * target).sum(dim=(1, 2))
-    denom  = prob.sum(dim=(1, 2)) + target.sum(dim=(1, 2))
-    dice   = (1.0 - (2.0 * inter + 1.0) / (denom + 1.0)).mean()
-    return bce + dice
+def seg_loss(logits, hard_mask):
+    """CE + Dice against a hard binary mask target."""
+    ce    = F.cross_entropy(logits, hard_mask, reduction="mean")
+    prob  = logits.softmax(1)[:, 1]
+    yf    = (hard_mask == 1).float()
+    inter = (prob * yf).sum(dim=(1, 2))
+    denom = prob.sum(dim=(1, 2)) + yf.sum(dim=(1, 2))
+    dice  = (1.0 - (2 * inter + 1.0) / (denom + 1.0)).mean()
+    return ce + dice
 
 
 def train_student(base_ds, cache, val_loader, in_ch, bs, device):
     """
-    Train a TinyUNet(base=16) student using cached noisy soft masks.
+    Train TinyUNet(base=16) student on cached GNMax hard masks.
     Returns best val Dice across all epochs.
     """
-    ds      = CachedOutputDataset(base_ds, cache)
+    ds      = CachedMaskDataset(base_ds, cache)
     loader  = DataLoader(ds, batch_size=bs, shuffle=True, drop_last=True)
     student = TinyUNet(in_ch=in_ch, num_classes=2, base=16).to(device)
     opt     = torch.optim.Adam(student.parameters(), lr=1e-3)
@@ -216,11 +209,11 @@ def train_student(base_ds, cache, val_loader, in_ch, bs, device):
     best_dice = 0.0
     for ep in range(STUDENT_EPOCHS):
         student.train()
-        for x, _y, nm in loader:
+        for x, hm in loader:
             x  = x.to(device)
-            nm = nm.to(device)
+            hm = hm.to(device)
             opt.zero_grad()
-            soft_mask_loss(student(x), nm).backward()
+            seg_loss(student(x), hm).backward()
             opt.step()
 
         val_dice = evaluate_vessel_dice(student, val_loader, device)
@@ -250,19 +243,29 @@ def main():
     val_ds     = get_dataset(args.dataset, "val")
     val_loader = DataLoader(val_ds, batch_size=4, shuffle=False)
 
-    print(f"PATE baseline (Papernot et al. 2017) — {args.dataset} | device={DEVICE}")
-    print(f"  in_ch={in_ch}  bs={bs}  K={K}")
+    delta_2 = math.sqrt(2.0 * IMG_SIZE * IMG_SIZE)
+
+    print(f"PATE/GNMax (Papernot et al. 2018) — {args.dataset} | device={DEVICE}")
+    print(f"  in_ch={in_ch}  bs={bs}  K={K}  H=W={IMG_SIZE}")
+    print(f"  Sensitivity Δ_2 = sqrt(2HW) = {delta_2:.2f}")
     print(f"  Train={len(train_ds)}  Val={len(val_ds)}")
     print(f"  Teacher epochs={TEACHER_EPOCHS}  Student epochs={STUDENT_EPOCHS}")
+    print(f"\n  Sigma values per epsilon:")
+    for eps in EPSILONS:
+        print(f"    ε={eps}  σ={compute_sigma(eps, DELTA):.2f}")
 
     results = {
-        "method":          "Output-Space DP (PATE — Papernot et al. 2017, adapted for segmentation)",
+        "method":          "PATE/GNMax (Papernot et al. 2018, adapted for segmentation)",
+        "paper":           "Scalable Private Learning with PATE, ICLR 2018, arXiv:1802.08908",
+        "aggregator":      "GNMax (Gaussian Noisy Max, per-pixel binary voting)",
+        "accounting":      "Renyi DP / zCDP, sensitivity=sqrt(2HW)",
         "dataset":         args.dataset,
         "K":               K,
+        "img_size":        IMG_SIZE,
+        "sensitivity_l2":  delta_2,
         "teacher_epochs":  TEACHER_EPOCHS,
         "student_epochs":  STUDENT_EPOCHS,
         "delta":           DELTA,
-        "caps_percentile": CAPS_PERCENTILE,
         "epsilons":        EPSILONS,
         "seeds":           SEEDS,
         "sweep":           {},
@@ -281,17 +284,12 @@ def main():
             train_ds, K, DEVICE, n_epochs=TEACHER_EPOCHS, in_ch=in_ch
         )
 
-        C   = compute_C(teachers, train_ds, DEVICE)
-        sen = 2.0 * C / K
-        print(f"  C (p{CAPS_PERCENTILE} soft-mask L2) = {C:.4f}   Δ = 2C/K = {sen:.4f}")
-
         for eps in EPSILONS:
-            rho   = eps_to_rho(eps, delta=DELTA)
-            sigma = sen / math.sqrt(2.0 * rho)
-            print(f"\n  ε={eps}  ρ={rho:.5f}  σ={sigma:.4f}")
+            sigma = compute_sigma(eps, DELTA)
+            print(f"\n  ε={eps}  σ={sigma:.2f}  (Δ_2={delta_2:.2f})")
 
-            cache = precompute_output_cache(
-                teachers, train_ds, C, sigma, DEVICE,
+            cache = precompute_gnmax_cache(
+                teachers, train_ds, sigma, DEVICE,
                 seed=seed + int(eps * 100),
             )
 
@@ -299,24 +297,23 @@ def main():
             np.random.seed(seed)
             dice = train_student(train_ds, cache, val_loader, in_ch, bs, DEVICE)
             all_dices_by_eps[str(eps)].append(dice)
-            sigma_by_eps[str(eps)] = {"sigma": float(sigma), "C": float(C), "delta": float(sen)}
-            print(f"  ε={eps}  seed={seed}:  Dice={dice:.4f}  (σ={sigma:.4f}  C={C:.4f})")
+            sigma_by_eps[str(eps)] = float(sigma)
+            print(f"  ε={eps}  seed={seed}:  Dice={dice:.4f}  σ={sigma:.2f}")
 
     print("\n" + "=" * 60)
     for eps in EPSILONS:
         dices = all_dices_by_eps[str(eps)]
         mean  = float(np.mean(dices))
         std   = float(np.std(dices))
+        sigma = sigma_by_eps[str(eps)]
         results["sweep"][str(eps)] = {
             "dices": [float(d) for d in dices],
             "mean":  mean,
             "std":   std,
             "sem":   std / math.sqrt(len(dices)),
-            "sigma": sigma_by_eps[str(eps)]["sigma"],
-            "C":     sigma_by_eps[str(eps)]["C"],
-            "delta": sigma_by_eps[str(eps)]["delta"],
+            "sigma": sigma,
         }
-        print(f"ε={eps}: {mean:.4f} ± {std:.4f}  (σ={sigma_by_eps[str(eps)]['sigma']:.4f})")
+        print(f"ε={eps}: {mean:.4f} ± {std:.4f}  σ={sigma:.2f}")
     print("=" * 60)
 
     out = HERE / "results" / f"{args.dataset}_pate_results.json"

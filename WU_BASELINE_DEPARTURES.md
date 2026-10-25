@@ -134,6 +134,27 @@ budget as ε_step = ε/T and computes σ using ε_step, ensuring the total priva
 spent across all T steps equals exactly ε. Using Eq. 7 directly would result in
 insufficient noise per step and an invalid privacy guarantee."
 
+**Fundamental limitation this creates (why DP-FKD underperforms):**
+Linear composition over T steps is not a correctable implementation detail — it is
+inherent to Wu et al.'s design. With T ≈ 920–1120 steps (40 epochs × batches),
+the per-step budget ε/T is tiny, forcing σ to ~10,000× the sensitivity (e.g.,
+σ_feat ≈ 10,852 at ε=1 for Kvasir). At this noise level the teacher's features
+are overwhelmed — the student cannot extract meaningful guidance and falls back
+to learning from labels alone, explaining why DP-FKD achieves only ~37–72% Dice
+at ε=1 vs CANAL's ~70–83%.
+
+This blowup could in principle be avoided by:
+1. **Sample-once caching** — noise teacher outputs once per image, cache, and
+   train the student on the fixed noisy cache. T=1, so the full ε budget applies
+   to a single release and σ drops to the same scale as CANAL.
+2. **Tighter composition (zCDP/RDP)** — reduces σ by ~10× vs linear composition
+   for the same ε, but still leaves σ in the hundreds for T~1000.
+
+Option 1 is precisely what CANAL does. The sample-once release is therefore not
+just about noise allocation (water-filling) — it also eliminates the T-step
+composition penalty entirely. This is an additional, independent advantage of
+CANAL's design that is worth stating explicitly in the paper.
+
 ---
 
 ## 3. What Is Unchanged (Faithful to the Paper)
