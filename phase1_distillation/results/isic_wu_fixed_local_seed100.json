@@ -1,0 +1,73 @@
+{
+  "method": "Wu et al. 2025 (adapted for medical image segmentation)",
+  "dataset": "isic",
+  "config": {
+    "in_ch": 3,
+    "bs": 45,
+    "n_views": 3
+  },
+  "teacher_epochs": 60,
+  "student_epochs": 40,
+  "delta": 1e-05,
+  "S_feat": 1.0,
+  "S_logit": 2.0,
+  "hparams": {
+    "alpha": 1.0,
+    "beta": 1.0,
+    "gamma": 1.0,
+    "delta_w": 0.1,
+    "lam_adv": 0.1,
+    "tau": 4.0
+  },
+  "epsilons": [
+    1.0,
+    2.0,
+    4.0,
+    8.0
+  ],
+  "seeds": [
+    100
+  ],
+  "sweep": {
+    "1.0": {
+      "dices": [
+        0.6873937203333929
+      ],
+      "mean": 0.6873937203333929,
+      "std": 0.0,
+      "sem": 0.0,
+      "sigma_feat": 387.5844210084311,
+      "sigma_logit": 775.1688420168622
+    },
+    "2.0": {
+      "dices": [
+        0.7063911419648391
+      ],
+      "mean": 0.7063911419648391,
+      "std": 0.0,
+      "sem": 0.0,
+      "sigma_feat": 193.79221050421555,
+      "sigma_logit": 387.5844210084311
+    },
+    "4.0": {
+      "dices": [
+        0.7413203624578623
+      ],
+      "mean": 0.7413203624578623,
+      "std": 0.0,
+      "sem": 0.0,
+      "sigma_feat": 96.89610525210777,
+      "sigma_logit": 193.79221050421555
+    },
+    "8.0": {
+      "dices": [
+        0.7196936286412753
+      ],
+      "mean": 0.7196936286412753,
+      "std": 0.0,
+      "sem": 0.0,
+      "sigma_feat": 48.44805262605389,
+      "sigma_logit": 96.89610525210777
+    }
+  }
+}

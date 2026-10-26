@@ -100,7 +100,7 @@ domain-required changes, all of which are disclosed.
 
 ---
 
-## 2b. Eq. 7 vs Algorithm 1 — Per-Step Composition (Improvement Over Paper)
+## 2b. Eq. 7 vs Algorithm 1 — Composition Over the Releases a Sample Takes Part In
 
 **What Eq. 7 (Section 5.3) says:**
 ```
@@ -109,51 +109,67 @@ domain-required changes, all of which are disclosed.
 This is the basic Gaussian mechanism formula for a **single release** — it assumes noise
 is added exactly once and the full ε budget is spent in that one step.
 
-**What Algorithm 1 says (what our code does):**
+**What Algorithm 1 says:**
 ```
 ε_step = ε / T
 σ = S√(2ln(1.25/δ)) / ε_step
 ```
-This divides the privacy budget equally across all T training steps. Each step spends
-only ε/T of the budget, so σ is computed with a much smaller per-step budget →
-much larger noise per step → correct multi-step privacy accounting.
+This divides the privacy budget equally across all T training steps.
 
-**Why Algorithm 1 is correct and Eq. 7 is not sufficient here:**
-Student training runs for T steps (e.g. BUSI: 40 epochs × 23 batches = 920 steps).
-Noise is added at every step. If Eq. 7 were used directly, σ would be computed with
-the full ε — far too little noise for 920 releases. An attacker observing all 920
-noisy outputs could average them to reconstruct the original with near-zero noise.
-Algorithm 1's per-step composition ensures the total privacy spent across all T steps
-equals exactly ε, making the formal guarantee honest.
+**What our code does (and why it differs from a literal reading of Algorithm 1):**
+```
+ε_step = ε / E          E = STUDENT_EPOCHS = 40
+σ = S√(2ln(1.25/δ)) / ε_step
+```
+The clipping in Algorithm 1 is per sample, so the sensitivity S is a sample-level
+bound. Under that adjacency, replacing one training record changes only the noisy
+releases of the mini-batches that contain it — exactly one per epoch (with
+drop_last=True a sample may be skipped in some epochs, which can only lower the
+count). The other (T − E) releases are computed from mini-batches the record is
+not in and are unchanged, so they contribute nothing to its privacy loss. Linear
+composition therefore runs over E = 40 releases per sample, not over all
+T = E × (N/B) steps (1840 on ISIC, 1120 on Kvasir, 920 on BUSI). This is the same
+release count the CANAL paper derives for per-iteration schemes, Q = TB/N (Sec. 2.1),
+and it makes σ independent of dataset size and batch size.
+
+Charging every sample for all T steps (as the code did before 2026-10-26) overstated
+each sample's participation ~N/B ≈ 23–46×, giving σ_feat ≈ 2,200–17,800 on ISIC.
+With the per-sample count, σ_feat is 48 / 97 / 194 / 388 at ε = 8 / 4 / 2 / 1
+(S_feat = 1), and σ_logit is twice that.
 
 **Paper text to use:**
-"Section 5.3 of Wu et al. (Eq. 7) presents the Gaussian mechanism formula for a
-single release: σ = Δ√(2ln(1.25/δ))/ε. However, student training adds noise at
-every mini-batch step. We therefore follow Algorithm 1, which divides the privacy
-budget as ε_step = ε/T and computes σ using ε_step, ensuring the total privacy
-spent across all T steps equals exactly ε. Using Eq. 7 directly would result in
-insufficient noise per step and an invalid privacy guarantee."
+"Wu et al. add Gaussian noise to the teacher's features and logits at every
+student mini-batch step and split the budget linearly across steps (Algorithm 1).
+Because their clipping is per sample, a record only participates in the releases
+of the mini-batches that contain it, one per epoch; we therefore compose over the
+E = 40 releases each sample takes part in, rather than over all T steps, which
+would charge a sample for releases that do not depend on it. All other elements
+of Algorithm 1 (linear composition, S_feat = 1, S_logit = 2, equal split between
+features and logits) are kept as stated."
 
-**Fundamental limitation this creates (why DP-FKD underperforms):**
-Linear composition over T steps is not a correctable implementation detail — it is
-inherent to Wu et al.'s design. With T ≈ 920–1120 steps (40 epochs × batches),
-the per-step budget ε/T is tiny, forcing σ to ~10,000× the sensitivity (e.g.,
-σ_feat ≈ 10,852 at ε=1 for Kvasir). At this noise level the teacher's features
-are overwhelmed — the student cannot extract meaningful guidance and falls back
-to learning from labels alone, explaining why DP-FKD achieves only ~37–72% Dice
-at ε=1 vs CANAL's ~70–83%.
+**Known looseness that is deliberately left in place (Wu's own design):**
+1. Linear (basic) composition is used, as in Algorithm 1. Composing the Gaussian
+   mechanism in zCDP/RDP would reduce σ by roughly √E ≈ 6× at the same ε.
+2. Under basic composition the per-step δ should be δ/E for the total to remain
+   δ = 1e-5; the code keeps δ per step, so the realised total δ is E·δ = 4e-4.
+3. S is used as the replace-one sensitivity. Under the replace-one convention
+   used for CANAL's own accounting (Δ = 2/K), a per-sample L2 clip to S gives
+   sensitivity 2S, which would double σ.
 
-This blowup could in principle be avoided by:
-1. **Sample-once caching** — noise teacher outputs once per image, cache, and
-   train the student on the fixed noisy cache. T=1, so the full ε budget applies
-   to a single release and σ drops to the same scale as CANAL.
-2. **Tighter composition (zCDP/RDP)** — reduces σ by ~10× vs linear composition
-   for the same ε, but still leaves σ in the hundreds for T~1000.
+Items 1–2 make the baseline look slightly better than a fully rigorous
+accounting; item 3 slightly worse. All three are Wu et al.'s stated choices and
+are kept so that the baseline is their algorithm, not ours.
 
-Option 1 is precisely what CANAL does. The sample-once release is therefore not
-just about noise allocation (water-filling) — it also eliminates the T-step
-composition penalty entirely. This is an additional, independent advantage of
-CANAL's design that is worth stating explicitly in the paper.
+**Why DP-FKD still underperforms CANAL at low ε:**
+Even with the per-sample count, σ_feat = 388 at ε = 1 on features clipped to unit
+L2 norm, so the feature and logit terms carry little signal at small budgets and
+the student leans on the supervised term. Sample-once caching (one release per
+image, as in CANAL) removes the E-fold composition entirely, which is an
+independent advantage of CANAL's design worth stating explicitly in the paper.
+Local ISIC-200 results under the corrected accounting (5 seeds):
+Dice 67.7 / 70.9 / 73.2 / 73.1 at ε = 1 / 2 / 4 / 8, against a no-noise ceiling
+of 73.1 for the same pipeline — monotone in ε and saturating at the ceiling
+from ε = 4.
 
 ---
 
@@ -161,7 +177,8 @@ CANAL's design that is worth stating explicitly in the paper.
 
 For completeness — these match the paper exactly and require no disclosure:
 
-- σ = S√(2ln(1.25/δ)) / (ε/T) — Algorithm 1, lines 2–3
+- σ = S√(2ln(1.25/δ)) / ε_step — Algorithm 1, lines 2–3 (with ε_step = ε/E rather
+  than ε/T; see Section 2b)
 - Sensitivity values: S_feat=1.0, S_logit=2.0 — Section 6.1.1
 - Privacy budget split: 50% for features, 50% for logits — Section 6.1.1
 - δ = 1e-5 — Section 6.1.1

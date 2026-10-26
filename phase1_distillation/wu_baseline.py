@@ -13,8 +13,13 @@ Adaptations for medical image segmentation (disclosed in paper):
   6. Missing hyperparameters (alpha, beta, gamma, delta_w, lambda_adv, tau) tuned
      on BUSI val at eps=8.0 with --hparam, then fixed for all datasets/epsilons.
 
-DP mechanism: Algorithm 1 from Wu et al. — linear composition.
-  sigma = S * sqrt(2*ln(1.25/delta)) / (eps/T)
+DP mechanism: Algorithm 1 from Wu et al. — linear composition over the releases
+that depend on a given sample.
+  sigma = S * sqrt(2*ln(1.25/delta)) / (eps/E),  E = STUDENT_EPOCHS
+  Clipping is per-sample, so replacing one record changes only the noisy
+  releases of the mini-batches that contain it: one per epoch (drop_last=True
+  can only make it fewer). Each sample therefore takes part in E = 40
+  releases, not in all T = E * (N/B) steps — this is the paper's Q = T*B/N.
   Budget split: 0.5*eps for features, 0.5*eps for logits.
   S_feat=1.0, S_logit=2.0 (stated in paper).
 
@@ -46,7 +51,8 @@ from drive_local_demo import TinyUNet, evaluate_vessel_dice
 HERE = Path(__file__).parent
 (HERE / "results").mkdir(exist_ok=True)
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = ("cuda" if torch.cuda.is_available()
+          else "mps" if torch.backends.mps.is_available() else "cpu")
 
 EPSILONS = [1.0, 2.0, 4.0, 8.0]
 SEEDS    = [100, 200, 300, 400, 500]
@@ -158,9 +164,9 @@ class MIADiscriminator(nn.Module):
 # =============================================================================
 
 def compute_sigma(eps_budget: float, delta: float, sensitivity: float,
-                  total_steps: int) -> float:
-    """Linear composition: each step spends eps_budget/total_steps."""
-    eps_step = eps_budget / total_steps
+                  n_releases: int) -> float:
+    """Linear composition: each release a sample takes part in spends eps_budget/n_releases."""
+    eps_step = eps_budget / n_releases
     return sensitivity * math.sqrt(2.0 * math.log(1.25 / delta)) / eps_step
 
 
@@ -299,10 +305,9 @@ def train_student(teacher, train_ds, val_loader, eps, hp, in_ch, bs, device):
     Returns (val_dice, sigma_feat, sigma_logit).
     """
     loader  = DataLoader(train_ds, batch_size=bs, shuffle=True, drop_last=True)
-    T_total = STUDENT_EPOCHS * len(loader)
 
-    sig_feat  = compute_sigma(0.5 * eps, DELTA, S_FEAT,  T_total)
-    sig_logit = compute_sigma(0.5 * eps, DELTA, S_LOGIT, T_total)
+    sig_feat  = compute_sigma(0.5 * eps, DELTA, S_FEAT,  STUDENT_EPOCHS)
+    sig_logit = compute_sigma(0.5 * eps, DELTA, S_LOGIT, STUDENT_EPOCHS)
 
     student = TinyUNet(in_ch=in_ch, num_classes=2, base=16).to(device)
     opt_s   = torch.optim.Adam(student.parameters(), lr=1e-3)
@@ -389,9 +394,8 @@ def run_hparam_search(device):
 
     for tau in tau_vals:
         loader2 = DataLoader(train_ds, batch_size=bs, shuffle=True, drop_last=True)
-        T  = STUD_HP_EP * len(loader2)
-        sf = compute_sigma(0.5 * EPS_HP, DELTA, S_FEAT,  T)
-        sl = compute_sigma(0.5 * EPS_HP, DELTA, S_LOGIT, T)
+        sf = compute_sigma(0.5 * EPS_HP, DELTA, S_FEAT,  STUD_HP_EP)
+        sl = compute_sigma(0.5 * EPS_HP, DELTA, S_LOGIT, STUD_HP_EP)
 
         student = TinyUNet(in_ch=1, num_classes=2, base=16).to(device)
         opt_s   = torch.optim.Adam(student.parameters(), lr=1e-3)
@@ -432,12 +436,22 @@ def run_hparam_search(device):
 # =============================================================================
 
 def main():
+    global TEACHER_EPOCHS, STUDENT_EPOCHS
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", required=True, choices=["isic", "kvasir", "busi"])
     parser.add_argument("--hparam",  action="store_true",
                         help="Run HP search on BUSI val (eps=8, 50 student epochs). "
                              "Saves results/wu_busi_hparams.json.")
+    parser.add_argument("--seeds",    type=int,   nargs="+", default=SEEDS)
+    parser.add_argument("--epsilons", type=float, nargs="+", default=EPSILONS)
+    parser.add_argument("--te", type=int, default=TEACHER_EPOCHS, help="teacher epochs")
+    parser.add_argument("--se", type=int, default=STUDENT_EPOCHS,
+                        help="student epochs (= number of releases per sample)")
+    parser.add_argument("--out", type=str, default=None,
+                        help="output JSON path (default: results/<dataset>_wu_results.json)")
     args = parser.parse_args()
+    TEACHER_EPOCHS, STUDENT_EPOCHS = args.te, args.se
+    seeds, epsilons = args.seeds, args.epsilons
 
     if args.hparam:
         run_hparam_search(DEVICE)
@@ -477,15 +491,15 @@ def main():
         "S_feat":          S_FEAT,
         "S_logit":         S_LOGIT,
         "hparams":         hp,
-        "epsilons":        EPSILONS,
-        "seeds":           SEEDS,
+        "epsilons":        epsilons,
+        "seeds":           seeds,
         "sweep":           {},
     }
 
-    all_dices_by_eps = {str(e): [] for e in EPSILONS}
+    all_dices_by_eps = {str(e): [] for e in epsilons}
     sig_by_eps       = {}
 
-    for s_idx, seed in enumerate(SEEDS):
+    for s_idx, seed in enumerate(seeds):
         torch.manual_seed(seed)
         np.random.seed(seed)
 
@@ -493,14 +507,14 @@ def main():
         mia          = MIADiscriminator(feat_dim=16 * 4).to(DEVICE)
         train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True, drop_last=True)
 
-        print(f"\n[Seed {seed} ({s_idx+1}/{len(SEEDS)})] "
+        print(f"\n[Seed {seed} ({s_idx+1}/{len(seeds)})] "
               f"Training teacher ({TEACHER_EPOCHS} epochs)...")
         train_teacher(teacher, mia, train_loader, val_loader, DEVICE, hp["lam_adv"])
 
         t_dice = evaluate_vessel_dice(teacher, val_loader, DEVICE)
         print(f"  Teacher val Dice: {t_dice:.4f}")
 
-        for eps in EPSILONS:
+        for eps in epsilons:
             dice, sf, sl = train_student(
                 teacher, train_ds, val_loader, eps, hp, in_ch, bs, DEVICE
             )
@@ -510,7 +524,7 @@ def main():
                   f"  (sigma_feat={sf:.1f}  sigma_logit={sl:.1f})")
 
     print("\n" + "=" * 60)
-    for eps in EPSILONS:
+    for eps in epsilons:
         dices = all_dices_by_eps[str(eps)]
         mean  = float(np.mean(dices))
         std   = float(np.std(dices))
@@ -528,7 +542,7 @@ def main():
               f"(sigma_feat={sf:.1f}  sigma_logit={sl:.1f})")
     print("=" * 60)
 
-    out = HERE / "results" / f"{args.dataset}_wu_results.json"
+    out = Path(args.out) if args.out else HERE / "results" / f"{args.dataset}_wu_results.json"
     out.write_text(json.dumps(results, indent=2))
     print(f"\nSaved: {out}")
 
