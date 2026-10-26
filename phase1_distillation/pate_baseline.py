@@ -36,7 +36,7 @@ Why this baseline underperforms CANAL:
   CANAL normalises each feature channel to the unit ball, giving sensitivity
   Δ_c = 2/K per channel and σ ≈ 5 at ε=1. PATE/GNMax works in pixel space
   where one teacher's entire H×W mask can flip, giving Δ_2 = √(2HW) ≈ 136
-  and σ ≈ 2000 at ε=1. CANAL's feature-space normalisation reduces
+  and σ ≈ 665 at ε=1. CANAL's feature-space normalisation reduces
   sensitivity by ~70× relative to PATE's pixel-space operation.
 
 Adaptations for segmentation (disclosed):
@@ -91,9 +91,9 @@ TEACHER_EPOCHS = 60
 STUDENT_EPOCHS = 40
 
 DATASET_CFG = {
-    "isic":   dict(in_ch=3, bs=45),
-    "kvasir": dict(in_ch=3, bs=28),
-    "busi":   dict(in_ch=1, bs=23),
+    "isic":   dict(in_ch=3, bs=4),
+    "kvasir": dict(in_ch=3, bs=4),
+    "busi":   dict(in_ch=1, bs=4),
 }
 
 
