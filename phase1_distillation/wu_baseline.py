@@ -9,7 +9,7 @@ Adaptations for medical image segmentation (disclosed in paper):
   3. Pixel-wise KL divergence for L_KD (Eq. 9) instead of image-level.
   4. Single sub-model for BUSI (grayscale) per paper's own single-channel rule
      (authors apply the same rule for MNIST in their ablation).
-  5. Batch sizes = sqrt(N) consistent with CANAL/DP-SGD setup for our datasets.
+  5. Batch size = 4, matching CANAL's student-training batch size for fair comparison.
   6. Missing hyperparameters (alpha, beta, gamma, delta_w, lambda_adv, tau) tuned
      on BUSI val at eps=8.0 with --hparam, then fixed for all datasets/epsilons.
 
@@ -63,11 +63,11 @@ S_LOGIT  = 2.0    # per-sample logit sensitivity    (Wu et al. Algorithm 1)
 TEACHER_EPOCHS = 60   # matches CANAL (--te 60)
 STUDENT_EPOCHS = 40   # matches CANAL (--se 40)
 
-# Batch sizes = sqrt(N), matching CANAL/DP-SGD for fair comparison
+# Batch size = 4, matching CANAL's student-training batch size for fair comparison.
 DATASET_CFG = {
-    "isic":   dict(in_ch=3, bs=45, n_views=3),
-    "kvasir": dict(in_ch=3, bs=28, n_views=3),
-    "busi":   dict(in_ch=1, bs=23, n_views=1),
+    "isic":   dict(in_ch=3, bs=4, n_views=3),
+    "kvasir": dict(in_ch=3, bs=4, n_views=3),
+    "busi":   dict(in_ch=1, bs=4, n_views=1),
 }
 
 # Default HP — used if wu_busi_hparams.json not found.
