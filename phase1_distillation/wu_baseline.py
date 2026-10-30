@@ -9,7 +9,7 @@ Adaptations for medical image segmentation (disclosed in paper):
   3. Pixel-wise KL divergence for L_KD (Eq. 9) instead of image-level.
   4. Single sub-model for BUSI (grayscale) per paper's own single-channel rule
      (authors apply the same rule for MNIST in their ablation).
-  5. Batch size = 4, matching CANAL's student-training batch size for fair comparison.
+  5. Batch size = √N per dataset (isic=45, kvasir=28, busi=23), matching DP-SGD convention.
   6. Missing hyperparameters (alpha, beta, gamma, delta_w, lambda_adv, tau) tuned
      on BUSI val at eps=8.0 with --hparam, then fixed for all datasets/epsilons.
 
@@ -63,11 +63,11 @@ S_LOGIT  = 2.0    # per-sample logit sensitivity    (Wu et al. Algorithm 1)
 TEACHER_EPOCHS = 60   # matches CANAL (--te 60)
 STUDENT_EPOCHS = 40   # matches CANAL (--se 40)
 
-# Batch size = 4, matching CANAL's student-training batch size for fair comparison.
+# Batch size = sqrt(N) per dataset, matching DP-SGD convention.
 DATASET_CFG = {
-    "isic":   dict(in_ch=3, bs=4, n_views=3),
-    "kvasir": dict(in_ch=3, bs=4, n_views=3),
-    "busi":   dict(in_ch=1, bs=4, n_views=1),
+    "isic":   dict(in_ch=3, bs=45, n_views=3),
+    "kvasir": dict(in_ch=3, bs=28, n_views=3),
+    "busi":   dict(in_ch=1, bs=23, n_views=1),
 }
 
 # Default HP — used if wu_busi_hparams.json not found.
@@ -425,7 +425,7 @@ def run_hparam_search(device):
     best_hp = dict(alpha=1.0, beta=1.0, gamma=1.0, delta_w=0.1,
                    lam_adv=LAM_ADV, tau=best_tau)
     print(f"\nBest: tau={best_tau}  Dice={best_dice:.4f}")
-    out = HERE / "results" / "wu_busi_hparams.json"
+    out = HERE / "results" / "wu_busi_hparams_sqrtN.json"
     out.write_text(json.dumps({"best": best_hp, "runs": runs}, indent=2))
     print(f"Saved: {out}")
     return best_hp
@@ -473,7 +473,7 @@ def main():
     print(f"  Teacher epochs={TEACHER_EPOCHS}  Student epochs={STUDENT_EPOCHS}")
 
     # Load tuned HP or fall back to defaults
-    hp_path = HERE / "results" / "wu_busi_hparams.json"
+    hp_path = HERE / "results" / "wu_busi_hparams_sqrtN.json"
     if hp_path.exists():
         hp = json.loads(hp_path.read_text())["best"]
         print(f"  HP (from {hp_path.name}): {hp}")
@@ -542,7 +542,7 @@ def main():
               f"(sigma_feat={sf:.1f}  sigma_logit={sl:.1f})")
     print("=" * 60)
 
-    out = Path(args.out) if args.out else HERE / "results" / f"{args.dataset}_wu_results.json"
+    out = Path(args.out) if args.out else HERE / "results" / f"{args.dataset}_wu_results_sqrtN.json"
     out.write_text(json.dumps(results, indent=2))
     print(f"\nSaved: {out}")
 
