@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=budget_abl_s1
-#SBATCH --partition=pascalnodes
+#SBATCH --partition=pascalnodes-medium
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
