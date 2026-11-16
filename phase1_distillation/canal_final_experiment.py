@@ -61,7 +61,6 @@ HERE = Path(__file__).parent
 (HERE / "checkpoints").mkdir(exist_ok=True)
 
 K         = 3
-KEEP_FRAC = 0.10
 
 
 def get_dataset(name, split, size):
@@ -151,9 +150,11 @@ def main():
     ap.add_argument("--fc", type=float, default=0.10, help="caps budget fraction")
     ap.add_argument("--fi", type=float, default=0.05, help="importance budget fraction")
     ap.add_argument("--fr", type=float, default=0.85, help="release budget fraction")
+    ap.add_argument("--keep_frac", type=float, default=0.10, help="fraction of channels to keep (top-k selection)")
     args = ap.parse_args()
 
     FC, FI, FR = args.fc, args.fi, args.fr
+    KEEP_FRAC  = args.keep_frac
     assert abs(FC + FI + FR - 1.0) < 1e-9, f"Budget fractions must sum to 1, got {FC+FI+FR}"
 
     dev   = ("cuda" if torch.cuda.is_available()
