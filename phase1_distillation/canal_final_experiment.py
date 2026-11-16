@@ -62,10 +62,6 @@ HERE = Path(__file__).parent
 
 K         = 3
 KEEP_FRAC = 0.10
-FC        = 0.10   # caps budget fraction
-FI        = 0.05   # importance budget fraction
-FR        = 0.85   # release budget fraction
-assert abs(FC + FI + FR - 1.0) < 1e-9, "Budget fractions must sum to 1"
 
 
 def get_dataset(name, split, size):
@@ -152,7 +148,13 @@ def main():
     ap.add_argument("--suffix",    default="", help="suffix appended to result and checkpoint filenames to avoid overwriting")
     ap.add_argument("--no_noise",  action="store_true",
                     help="Non-private reference (eps=inf): run once with sigma=0, no DP noise anywhere")
+    ap.add_argument("--fc", type=float, default=0.10, help="caps budget fraction")
+    ap.add_argument("--fi", type=float, default=0.05, help="importance budget fraction")
+    ap.add_argument("--fr", type=float, default=0.85, help="release budget fraction")
     args = ap.parse_args()
+
+    FC, FI, FR = args.fc, args.fi, args.fr
+    assert abs(FC + FI + FR - 1.0) < 1e-9, f"Budget fractions must sum to 1, got {FC+FI+FR}"
 
     dev   = ("cuda" if torch.cuda.is_available()
              else "mps" if torch.backends.mps.is_available() else "cpu")
