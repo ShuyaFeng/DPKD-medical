@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=attack_isic
-#SBATCH --partition=pascalnodes
+#SBATCH --partition=pascalnodes-medium
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=0-12:00:00
+#SBATCH --time=2-00:00:00
 #SBATCH --output=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/attack_isic_%j.out
 #SBATCH --error=/home/ab36/DPKD-medical/phase1_distillation/slurm_logs/attack_isic_%j.err
 
